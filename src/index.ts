@@ -1,3 +1,4 @@
+import { createApp } from './api/app'
 import { loadConfig, loadEnv } from './config'
 import { createDb } from './db/client'
 import { migrate } from './db/migrate'
@@ -11,8 +12,9 @@ const config = await loadConfig()
 await migrate(env.databaseUrl)
 
 const { db, client } = createDb(env.databaseUrl)
+const ollama = new OllamaClient(env.ollamaUrl, config.ollama.model)
 const ingester = new Ingester(db, config)
-const embedWorker = new EmbedWorker(db, config, new OllamaClient(env.ollamaUrl, config.ollama.model))
+const embedWorker = new EmbedWorker(db, config, ollama)
 
 const shutdown = async () => {
   console.log('shutting down…')
@@ -28,4 +30,7 @@ process.on('SIGTERM', shutdown)
 ingester.start(env.tabWsUrl)
 embedWorker.start()
 
-console.log('reservoir: ingesting + embedding')
+const app = createApp({ db, config, ollama })
+Bun.serve({ port: env.port, fetch: app.fetch })
+
+console.log(`reservoir: ingesting + embedding, api on :${env.port}`)
