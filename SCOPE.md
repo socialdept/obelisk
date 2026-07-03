@@ -41,11 +41,20 @@ AppView" — minus the write path, plus search/vectors/webhooks/link-graph.
 
 ## In scope — now (closes the stated consumer needs)
 
+- **XRPC query surface** — atproto-shaped API:
+  `/xrpc/{collection}.getRecords|getRecord|countRecords|searchRecords` where
+  `{collection}` is the archived collection being queried (e.g.
+  `/xrpc/site.standard.document.getRecords`), with a `where` filter DSL
+  (`eq`/`contains`/`in`, record + system fields), `sortBy`, cursor
+  pagination, and standard atproto error bodies. Read-only verbs only.
+  Service-level endpoints (events/webhooks/audiences) keep `/api/v1` until a
+  reservoir NSID namespace is chosen.
 - **Time-range filters + ordering on `/events`** (`since`/`until`, desc) —
   "when did publications we maintain change their records"
 - **Generic aggregation/stats endpoints** — counts and group-bys over
   records/links/events with the same filter vocabulary (interaction counts,
-  subscriber growth, activity over time)
+  subscriber growth, activity over time). `countRecords` + `where` covers the
+  record-counting slice of this.
 
 ## In scope — phase 2 (roadmap, sequenced after real usage)
 

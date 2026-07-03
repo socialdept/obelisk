@@ -12,6 +12,7 @@ import { recordsRoutes } from './routes/records'
 import { searchRoutes } from './routes/search'
 import { typesRoutes } from './routes/types'
 import { webhooksRoutes } from './routes/webhooks'
+import { xrpcRoutes } from './xrpc/collections'
 
 export interface ApiDeps {
   db: Db
@@ -44,5 +45,12 @@ export function createApp({ db, config, ollama, constellation, lexicons, devMode
   v1.route('/audiences', audiencesRoutes(db))
 
   app.route('/api/v1', v1)
+
+  // atproto-shaped query surface: /xrpc/{collection}.{verb}
+  const xrpc = new Hono()
+  if (!devMode) xrpc.use('*', bearerAuth(db))
+  xrpc.route('/', xrpcRoutes(db, ollama))
+  app.route('/xrpc', xrpc)
+
   return app
 }

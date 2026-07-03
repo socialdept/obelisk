@@ -64,6 +64,27 @@ Useful flags: `include_deleted=1` (see soft-deleted records), `cursor` (paginati
 
 ## API
 
+### XRPC (atproto-shaped, primary)
+
+Every archived collection gets read-only XRPC methods — the method NSID is the collection itself:
+
+```bash
+# list with filters + sorting (slices-style where DSL: eq / contains / in)
+curl -X POST "localhost:3000/xrpc/site.standard.document.getRecords" -d '{
+  "where": { "content.$type": { "eq": "app.offprint.content" } },
+  "sortBy": [{ "field": "indexedAt", "direction": "desc" }],
+  "limit": 20
+}'
+
+curl "localhost:3000/xrpc/site.standard.document.getRecord?uri=at://…"
+curl -X POST "localhost:3000/xrpc/site.standard.document.countRecords" -d '{"where": {…}}'
+curl -X POST "localhost:3000/xrpc/site.standard.document.searchRecords" -d '{"q": "atproto", "semantic": true}'
+```
+
+`where` supports record fields (dot paths like `content.$type`), system fields (`did`, `collection`, `rkey`, `uri`, `cid`, `indexedAt`), and the special `json` field (whole-record search). Responses use atproto conventions (`{uri, cid, did, collection, value, indexedAt}`, `{error, message}` errors). Write verbs return `MethodNotImplemented` — reservoir is a read-only archive.
+
+### REST (service endpoints)
+
 | Endpoint | What it does |
 |---|---|
 | `GET /api/v1/records` | List/filter archived records |
