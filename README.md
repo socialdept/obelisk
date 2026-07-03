@@ -20,6 +20,10 @@ Deletions on the network become soft deletes — the archive remembers, queries 
 
 A previous attempt using Tap's webhook delivery flooded the receiving app during backfill (hundreds of requests/sec). Reservoir consumes Tab's acknowledged websocket directly with in-process batching — backpressure by construction.
 
+## Design principle
+
+**Generalized to any lexicon, always.** Behavior is derived from published lexicon schemas wherever possible (the registry resolves any NSID from the network); where derivation can't work, there's a config extension point anyone can fill (`reservoir.config.ts` — collections, text fields, rich content fields, following semantics). Features that would require hardcoding a specific lexicon don't ship. Standard.site collections are the *default config*, not assumptions in code.
+
 ## How
 
 - **Bun + TypeScript**, single process: ingester + embedding worker + HTTP API
