@@ -1,8 +1,12 @@
 import { Hono } from 'hono'
-import { sql } from 'drizzle-orm'
+import { sql, type SQL } from 'drizzle-orm'
 import type { Db } from '../../db/client'
 import type { OllamaClient } from '../../embed/ollama'
-import { parseLimit } from './records'
+import { parseLimit, recordJsonFilters } from './records'
+
+function andAll(filters: SQL[]): SQL {
+  return filters.length > 0 ? sql`AND ${sql.join(filters, sql` AND `)}` : sql``
+}
 
 export function searchRoutes(db: Db, ollama: OllamaClient): Hono {
   const app = new Hono()
@@ -23,6 +27,7 @@ export function searchRoutes(db: Db, ollama: OllamaClient): Hono {
         AND deleted_at IS NULL
         ${collection ? sql`AND collection = ${collection}` : sql``}
         ${did ? sql`AND did = ${did}` : sql``}
+        ${andAll(recordJsonFilters(c.req.query()))}
       ORDER BY rank DESC
       LIMIT ${limit}
     `)
@@ -41,7 +46,7 @@ export function searchRoutes(db: Db, ollama: OllamaClient): Hono {
     const vec = JSON.stringify(queryVector)
 
     const rows = await db.execute(sql`
-      SELECT r.did, r.collection, r.rkey, r.uri, r.record, r.indexed_at,
+      SELECT records.did, records.collection, records.rkey, records.uri, records.record, records.indexed_at,
              t.distance, t.chunk_text
       FROM (
         SELECT DISTINCT ON (record_id) record_id, distance, chunk_text
@@ -53,9 +58,10 @@ export function searchRoutes(db: Db, ollama: OllamaClient): Hono {
         ) nn
         ORDER BY record_id, distance
       ) t
-      JOIN records r ON r.id = t.record_id
-      WHERE r.deleted_at IS NULL
-        ${collection ? sql`AND r.collection = ${collection}` : sql``}
+      JOIN records ON records.id = t.record_id
+      WHERE records.deleted_at IS NULL
+        ${collection ? sql`AND records.collection = ${collection}` : sql``}
+        ${andAll(recordJsonFilters(c.req.query()))}
       ORDER BY t.distance
       LIMIT ${limit}
     `)

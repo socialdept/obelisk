@@ -161,3 +161,43 @@ describe('GET /api/v1/search/semantic', () => {
     expect(body.results[0]!.distance).toBeLessThan(body.results[1]!.distance)
   })
 })
+
+describe('record.<path> JSON filters', () => {
+  test('filters records by nested $type', async () => {
+    await applyEvent(
+      db,
+      testConfig,
+      makeEvent({ rkey: 'op-1', record: { title: 'Offprint doc', content: { $type: 'app.offprint.content' } } }),
+    )
+    await applyEvent(
+      db,
+      testConfig,
+      makeEvent({ rkey: 'lf-1', record: { title: 'Leaflet doc', content: { $type: 'pub.leaflet.content' } } }),
+    )
+
+    const res = await app.request('/api/v1/records?record.content.$type=app.offprint.content', { headers: AUTH })
+    const body = (await res.json()) as { records: { rkey: string }[] }
+
+    expect(body.records).toHaveLength(1)
+    expect(body.records[0]!.rkey).toBe('op-1')
+  })
+
+  test('keyword search respects JSON filter', async () => {
+    await applyEvent(
+      db,
+      testConfig,
+      makeEvent({ rkey: 'op-2', record: { title: 'Shared words here', content: { $type: 'app.offprint.content' } } }),
+    )
+    await applyEvent(
+      db,
+      testConfig,
+      makeEvent({ rkey: 'lf-2', record: { title: 'Shared words here', content: { $type: 'pub.leaflet.content' } } }),
+    )
+
+    const res = await app.request('/api/v1/search?q=shared+words&record.content.$type=app.offprint.content', { headers: AUTH })
+    const body = (await res.json()) as { results: { rkey: string }[] }
+
+    expect(body.results).toHaveLength(1)
+    expect(body.results[0]!.rkey).toBe('op-2')
+  })
+})

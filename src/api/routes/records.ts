@@ -1,9 +1,24 @@
 import { Hono } from 'hono'
-import { and, desc, eq, isNull, lt, type SQL } from 'drizzle-orm'
+import { and, desc, eq, isNull, lt, sql, type SQL } from 'drizzle-orm'
 import type { Db } from '../../db/client'
 import { records } from '../../db/schema'
 
 const MAX_LIMIT = 100
+
+/**
+ * Filters on record JSON fields via `record.<path>=<value>` query params,
+ * e.g. ?record.content.$type=app.offprint.content
+ */
+export function recordJsonFilters(query: Record<string, string>): SQL[] {
+  const filters: SQL[] = []
+  for (const [key, value] of Object.entries(query)) {
+    if (!key.startsWith('record.')) continue
+    const parts = key.slice('record.'.length).split('.')
+    const args = sql.join(parts.map((part) => sql`${part}`), sql`, `)
+    filters.push(sql`jsonb_extract_path_text(${records.record}, ${args}) = ${value}`)
+  }
+  return filters
+}
 
 export function recordFilters(query: {
   did?: string
@@ -46,7 +61,7 @@ export function recordsRoutes(db: Db): Hono {
 
   app.get('/', async (c) => {
     const query = c.req.query()
-    const filters = recordFilters(query)
+    const filters = [...recordFilters(query), ...recordJsonFilters(query)]
     const limit = parseLimit(query.limit)
 
     if (query.cursor) {
