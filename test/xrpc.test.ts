@@ -108,6 +108,30 @@ describe('/xrpc/{collection}.getRecords', () => {
     expect(typed.records[0]!.value.title).toBe('Grunge Revival')
   })
 
+  test('record. prefix forces a JSON path past system-field shadowing', async () => {
+    // A record whose own body carries a `did` key that differs from its repo DID.
+    await applyEvent(
+      db,
+      testConfig,
+      makeEvent({ did: 'did:plc:alice', rkey: 'r1', record: { title: 'Owned', did: 'did:plc:subject' } }),
+    )
+    await applyEvent(
+      db,
+      testConfig,
+      makeEvent({ did: 'did:plc:alice', rkey: 'r2', record: { title: 'Other', did: 'did:plc:someone-else' } }),
+    )
+
+    // Bare `did` hits the indexed system column (repo DID) — both records match.
+    const bySystem = await xrpc('getRecords', { where: { did: { eq: 'did:plc:alice' } } })
+    expect(((await bySystem.json()) as { records: unknown[] }).records).toHaveLength(2)
+
+    // `record.did` reaches into the record body instead — only the one match.
+    const byRecord = await xrpc('getRecords', { where: { 'record.did': { eq: 'did:plc:subject' } } })
+    const scoped = (await byRecord.json()) as { records: { value: { title: string } }[] }
+    expect(scoped.records).toHaveLength(1)
+    expect(scoped.records[0]!.value.title).toBe('Owned')
+  })
+
   test('json special field searches the whole record', async () => {
     await seed()
     const res = await xrpc('getRecords', { where: { json: { contains: 'offprint' } } })

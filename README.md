@@ -45,7 +45,7 @@ docker compose up -d          # postgres (pgvector) + tab
 cp .env.example .env
 ollama pull nomic-embed-text  # embedding model, runs on CPU
 bun install
-bun run start                 # migrates, then: ingester + embed worker + API on :3000
+bun run start                 # migrates, then: ingester + embed worker + API on :6060
 ```
 
 Mint a token and query:
@@ -53,13 +53,13 @@ Mint a token and query:
 ```bash
 TOKEN=$(bun run scripts/create-token.ts cli)
 A="Authorization: Bearer $TOKEN"
-curl -X POST -H "$A" "localhost:3000/xrpc/site.standard.document.getRecords" -d '{"limit": 5}'
-curl -X POST -H "$A" "localhost:3000/xrpc/site.standard.document.searchRecords" -d '{"q": "atproto"}'
-curl -X POST -H "$A" "localhost:3000/xrpc/site.standard.document.searchRecords" -d '{"q": "decentralized publishing", "semantic": true}'
-curl -H "$A" "localhost:3000/xrpc/social.dept.obelisk.getLinks?uri=at://{did}/{collection}/{rkey}"
-curl -H "$A" "localhost:3000/xrpc/social.dept.obelisk.getBacklinks?uri=at://{did}/{collection}/{rkey}"
-curl -H "$A" "localhost:3000/xrpc/social.dept.obelisk.getNetworkBacklinks?uri=at://{did}/{collection}/{rkey}"
-curl -H "$A" "localhost:3000/xrpc/social.dept.obelisk.getFootprint?did={did}&includeDeleted=1"
+curl -X POST -H "$A" "localhost:6060/xrpc/site.standard.document.getRecords" -d '{"limit": 5}'
+curl -X POST -H "$A" "localhost:6060/xrpc/site.standard.document.searchRecords" -d '{"q": "atproto"}'
+curl -X POST -H "$A" "localhost:6060/xrpc/site.standard.document.searchRecords" -d '{"q": "decentralized publishing", "semantic": true}'
+curl -H "$A" "localhost:6060/xrpc/social.dept.obelisk.getLinks?uri=at://{did}/{collection}/{rkey}"
+curl -H "$A" "localhost:6060/xrpc/social.dept.obelisk.getBacklinks?uri=at://{did}/{collection}/{rkey}"
+curl -H "$A" "localhost:6060/xrpc/social.dept.obelisk.getNetworkBacklinks?uri=at://{did}/{collection}/{rkey}"
+curl -H "$A" "localhost:6060/xrpc/social.dept.obelisk.getFootprint?did={did}&includeDeleted=1"
 ```
 
 Everything is XRPC — there is no REST plane. Useful flags: `includeDeleted` (see soft-deleted records), `cursor` (pagination), `collection`/`did`/`path` filters on backlinks.
@@ -76,18 +76,18 @@ The method NSID *is* the archived collection you're querying:
 
 ```bash
 # list with filters + sorting (slices-style where DSL: eq / contains / in)
-curl -X POST "localhost:3000/xrpc/site.standard.document.getRecords" -d '{
+curl -X POST "localhost:6060/xrpc/site.standard.document.getRecords" -d '{
   "where": { "content.$type": { "eq": "app.offprint.content" } },
   "sortBy": [{ "field": "indexedAt", "direction": "desc" }],
   "limit": 20
 }'
 
-curl "localhost:3000/xrpc/site.standard.document.getRecord?uri=at://…"
-curl -X POST "localhost:3000/xrpc/site.standard.document.countRecords" -d '{"where": {…}}'
-curl -X POST "localhost:3000/xrpc/site.standard.document.searchRecords" -d '{"q": "atproto", "semantic": true}'
+curl "localhost:6060/xrpc/site.standard.document.getRecord?uri=at://…"
+curl -X POST "localhost:6060/xrpc/site.standard.document.countRecords" -d '{"where": {…}}'
+curl -X POST "localhost:6060/xrpc/site.standard.document.searchRecords" -d '{"q": "atproto", "semantic": true}'
 ```
 
-`where` supports record fields (dot paths like `content.$type`), system fields (`did`, `collection`, `rkey`, `uri`, `cid`, `indexedAt`), and the special `json` field (whole-record search). Responses use atproto conventions (`{uri, cid, did, collection, value, indexedAt}`, `{error, message}` errors). Write verbs return `MethodNotImplemented` — Obelisk is a read-only archive.
+`where` supports record fields (dot paths like `content.$type`, resolved against the record body — **not** prefixed with `value`), system fields (`did`, `collection`, `rkey`, `uri`, `cid`, `rev`, `indexedAt`), and the special `json` field (whole-record search). System fields win on a name clash; prefix with `record.` (e.g. `record.did`) to force a JSON-path lookup and reach a record whose own body carries a `did`/`uri`/… key. Responses use atproto conventions (`{uri, cid, did, collection, value, indexedAt}`, `{error, message}` errors). Write verbs return `MethodNotImplemented` — Obelisk is a read-only archive.
 
 ### Service plane — `/xrpc/social.dept.obelisk.{verb}`
 
@@ -97,7 +97,7 @@ Obelisk's own cross-collection / archive operations, under the owned authority `
 
 | Method | What it does |
 |---|---|
-| `getEvents` | Cursor-paged change log — filters `cursor`, `collection`, `did`, `action`, `audience`, `feed`, `link.*`, `record.*`, `include_record` |
+| `getEvents` | Cursor-paged change log — filters `cursor`, `since`, `until`, `order` (`asc`/`desc`), `collection`, `did`, `action`, `audience`, `feed`, `link.*`, `record.*`, `include_record` |
 | `getTypes?collection=&path=` | Inventory of `$type` values observed in the archive, by path, with counts |
 | `getType?nsid=` | Usage + resolved lexicon schema + derived text fields + observed union members |
 | `getLinks?uri=` | Outgoing AT Proto references extracted from a record |
@@ -123,10 +123,10 @@ Obelisk's own cross-collection / archive operations, under the owned authority `
 | `removeWatchedDid` | `{did}` | Un-watch + un-enroll |
 
 ```bash
-curl -H "$A" "localhost:3000/xrpc/social.dept.obelisk.getEvents?cursor=0&collection=site.standard.document"
-curl -H "$A" "localhost:3000/xrpc/social.dept.obelisk.getFootprint?did=did:plc:…&includeDeleted=1"
-curl -H "$A" "localhost:3000/xrpc/social.dept.obelisk.getBackfillStatus?collection=site.standard.document"
-curl -X POST -H "$A" "localhost:3000/xrpc/social.dept.obelisk.addWatchedDid" -d '{"did": "did:plc:…"}'
+curl -H "$A" "localhost:6060/xrpc/social.dept.obelisk.getEvents?cursor=0&collection=site.standard.document"
+curl -H "$A" "localhost:6060/xrpc/social.dept.obelisk.getFootprint?did=did:plc:…&includeDeleted=1"
+curl -H "$A" "localhost:6060/xrpc/social.dept.obelisk.getBackfillStatus?collection=site.standard.document"
+curl -X POST -H "$A" "localhost:6060/xrpc/social.dept.obelisk.addWatchedDid" -d '{"did": "did:plc:…"}'
 ```
 
 ### Backfill progress
@@ -151,10 +151,10 @@ Collection-plane queries filter against record JSON via the `where` DSL (dot pat
 
 ```bash
 # all documents whose content block is Offprint's
-curl -X POST -H "$A" "localhost:3000/xrpc/site.standard.document.getRecords" \
+curl -X POST -H "$A" "localhost:6060/xrpc/site.standard.document.getRecords" \
   -d '{"where": {"content.$type": {"eq": "app.offprint.content"}}}'
 # semantic search within that slice
-curl -X POST -H "$A" "localhost:3000/xrpc/site.standard.document.searchRecords" \
+curl -X POST -H "$A" "localhost:6060/xrpc/site.standard.document.searchRecords" \
   -d '{"q": "ai filmmaking", "semantic": true, "where": {"content.$type": {"eq": "app.offprint.content"}}}'
 ```
 
@@ -167,7 +167,7 @@ Use `getTypes` to discover which `$type` values exist before filtering.
 **Push:** create a webhook subscription and Obelisk delivers the same events as batched, HMAC-signed POSTs — full batch immediately, partial batch at most once per `max_wait_ms`, so your endpoint is never flooded:
 
 ```bash
-curl -X POST … "localhost:3000/xrpc/social.dept.obelisk.createWebhook" -d '{
+curl -X POST … "localhost:6060/xrpc/social.dept.obelisk.createWebhook" -d '{
   "name": "my-laravel-app",
   "url": "http://laravel.test/hooks/obelisk",
   "collections": ["site.standard.document"],
@@ -185,7 +185,7 @@ An audience is a **query over the archive**, not a list you maintain — members
 
 ```bash
 # everyone subscribed to your publication — zero bookkeeping, ever
-curl -X POST … "localhost:3000/xrpc/social.dept.obelisk.createAudience" -d '{
+curl -X POST … "localhost:6060/xrpc/social.dept.obelisk.createAudience" -d '{
   "name": "my-subscribers",
   "definition": { "kind": "backlink", "target": "at://did:plc:…/site.standard.publication/self",
                   "collection": "site.standard.graph.subscription", "path": "publication" }
@@ -200,10 +200,10 @@ Link-based filters on `getEvents` (and webhook subscriptions via the `feed` fiel
 
 ```bash
 # personalized following feed: docs from every publication this user subscribes to
-curl … "localhost:3000/xrpc/social.dept.obelisk.getEvents?feed=following:did:plc:xyz&collection=site.standard.document"
+curl … "localhost:6060/xrpc/social.dept.obelisk.getEvents?feed=following:did:plc:xyz&collection=site.standard.document"
 
 # records linking to an exact target at a path
-curl … "localhost:3000/xrpc/social.dept.obelisk.getEvents?link.site=at://did:plc:…/site.standard.publication/self"
+curl … "localhost:6060/xrpc/social.dept.obelisk.getEvents?link.site=at://did:plc:…/site.standard.publication/self"
 ```
 
 Following semantics (which collection/link path expresses "following") are configurable in `obelisk.config.ts` under `feeds.following` — not hardcoded to Standard.site.

@@ -6,11 +6,14 @@ import { records } from '../../db/schema'
  *
  *   { "title": { "contains": "atproto" },          // record field
  *     "did": { "eq": "did:plc:x" },                // system field
+ *     "record.did": { "eq": "did:plc:y" },         // forced record path
  *     "condition": { "in": ["a", "b"] },
  *     "json": { "contains": "nirvana" } }          // whole-record search
  *
  * Operators: eq, contains (case-insensitive), in. Record fields support dot
- * paths (content.$type). Conditions AND together.
+ * paths (content.$type). A `record.` prefix forces a JSON-path lookup even when
+ * the field name collides with a system field (so a record whose own body has a
+ * `did`/`uri`/… key stays reachable). Conditions AND together.
  */
 
 export type WhereClause = Record<string, { eq?: unknown; contains?: string; in?: unknown[] }>
@@ -49,10 +52,18 @@ export function whereFilters(where: WhereClause): SQL[] | { error: string } {
 
 function columnFor(field: string): SQL {
   if (field === 'json') return sql`${records.record}::text`
+
+  // `record.` forces a JSON path, bypassing system-field shadowing.
+  if (field.startsWith('record.')) return jsonPath(field.slice('record.'.length))
+
   const system = SYSTEM_FIELDS[field]
   if (system) return system
 
-  const parts = field.split('.')
+  return jsonPath(field)
+}
+
+function jsonPath(path: string): SQL {
+  const parts = path.split('.')
   const args = sql.join(parts.map((part) => sql`${part}`), sql`, `)
   return sql`jsonb_extract_path_text(${records.record}, ${args})`
 }

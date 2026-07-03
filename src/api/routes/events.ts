@@ -1,4 +1,4 @@
-import { and, asc, eq, gt, sql, type SQL } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, gte, lt, lte, sql, type SQL } from 'drizzle-orm'
 import { audienceFilter, findAudience } from '../../audiences/definition'
 import type { ObeliskConfig } from '../../config'
 import type { Db } from '../../db/client'
@@ -15,8 +15,12 @@ export interface EventsResult {
 
 /**
  * Cursor-paged change log query behind the social.dept.obelisk.getEvents XRPC
- * method. `query` is the raw query-param record. Returns `{ error }` on a
- * client mistake (bad cursor / unknown audience / bad feed) — all 400s.
+ * method. `query` is the raw query-param record. `since`/`until` bound the
+ * event `created_at` (ISO timestamps, inclusive). `order` is `asc` (default,
+ * oldest-first replay) or `desc` (newest-first) — the cursor stays a monotonic
+ * event id and pages the chosen direction. Returns `{ error }` on a client
+ * mistake (bad cursor / bad since|until / bad order / unknown audience / bad
+ * feed) — all 400s.
  */
 export async function queryEvents(
   db: Db,
@@ -25,11 +29,25 @@ export async function queryEvents(
 ): Promise<EventsResult | { error: string }> {
   const limit = parseEventLimit(query.limit)
 
+  const order = query.order ?? 'asc'
+  if (order !== 'asc' && order !== 'desc') return { error: `invalid order: ${order} (expected asc or desc)` }
+
   const filters: SQL[] = []
   if (query.cursor) {
     const cursorId = Number(query.cursor)
     if (!Number.isInteger(cursorId) || cursorId < 0) return { error: 'invalid cursor' }
-    filters.push(gt(events.id, cursorId))
+    // Page in the requested direction: past the cursor id, away from where we started.
+    filters.push(order === 'desc' ? lt(events.id, cursorId) : gt(events.id, cursorId))
+  }
+  if (query.since) {
+    const since = new Date(query.since)
+    if (Number.isNaN(since.getTime())) return { error: 'invalid since (expected an ISO timestamp)' }
+    filters.push(gte(events.createdAt, since))
+  }
+  if (query.until) {
+    const until = new Date(query.until)
+    if (Number.isNaN(until.getTime())) return { error: 'invalid until (expected an ISO timestamp)' }
+    filters.push(lte(events.createdAt, until))
   }
   if (query.collection) filters.push(eq(events.collection, query.collection))
   if (query.did) filters.push(eq(events.did, query.did))
@@ -57,7 +75,7 @@ export async function queryEvents(
     .from(events)
     .innerJoin(records, eq(records.id, events.recordId))
     .where(and(...filters))
-    .orderBy(asc(events.id))
+    .orderBy(order === 'desc' ? desc(events.id) : asc(events.id))
     .limit(limit)
 
   const last = rows.at(-1)

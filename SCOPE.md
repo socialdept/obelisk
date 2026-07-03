@@ -64,7 +64,8 @@ holds; the collection plane's write verbs stay `MethodNotImplemented`.
 - Query API: records, `record.<path>`/`link.<path>` filters, FTS, semantic
   search, internal links/backlinks, cached Constellation network backlinks
 - Type inventory + lexicon registry (`getTypes`), lexicon-derived extraction
-- Event log + cursor pull API, batched HMAC webhooks
+- Event log + cursor pull API (`getEvents`: `since`/`until` time bounds, `asc`/`desc`
+  ordering — "when did publications we maintain change their records"), batched HMAC webhooks
 - Audiences (backlink / outlink / collection / static) and following feeds
 - Backfill progress (`getBackfillStatus`, LAB-34) — read off the event log via
   Tab's `live:false→true` cutover; drain-based `complete`. No `%`-of-network:
@@ -85,8 +86,6 @@ holds; the collection plane's write verbs stay `MethodNotImplemented`.
   domain `dept.social`) carries archive queries **and** management procedures
   (webhooks/audiences/watched-dids as POST procedures — mutating Obelisk's own
   DB, never a PDS).
-- **Time-range filters + ordering on `/events`** (`since`/`until`, desc) —
-  "when did publications we maintain change their records"
 - **Generic aggregation/stats endpoints** — counts and group-bys over
   records/links/events with the same filter vocabulary (interaction counts,
   subscriber growth, activity over time). `countRecords` + `where` covers the

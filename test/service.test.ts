@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'bun:test'
+import { sql } from 'drizzle-orm'
 import type { Hono } from 'hono'
 import { createApp } from '../src/api/app'
 import { hashToken } from '../src/api/auth'
@@ -100,6 +101,68 @@ describe(`${NS}.getEvents`, () => {
 
   test('bad cursor → InvalidRequest', async () => {
     const res = await xrpc('getEvents', { cursor: 'nope' })
+    expect(res.status).toBe(400)
+    expect(((await res.json()) as { error: string }).error).toBe('InvalidRequest')
+  })
+
+  // Stamp known created_at timestamps onto the three seeded events, keyed by rkey.
+  async function seedTimeline(): Promise<void> {
+    await seed()
+    await db.execute(sql`UPDATE events SET created_at = '2026-01-01T00:00:00Z' WHERE rkey = 'd1'`)
+    await db.execute(sql`UPDATE events SET created_at = '2026-02-01T00:00:00Z' WHERE rkey = 'd2'`)
+    await db.execute(sql`UPDATE events SET created_at = '2026-03-01T00:00:00Z' WHERE rkey = 'sub-1'`)
+  }
+
+  test('since bounds the log inclusively', async () => {
+    await seedTimeline()
+    const res = await xrpc('getEvents', { since: '2026-02-01T00:00:00Z' })
+    const body = (await res.json()) as { events: { rkey: string }[] }
+    expect(body.events.map((e) => e.rkey).sort()).toEqual(['d2', 'sub-1'])
+  })
+
+  test('until bounds the log inclusively', async () => {
+    await seedTimeline()
+    const res = await xrpc('getEvents', { until: '2026-02-01T00:00:00Z' })
+    const body = (await res.json()) as { events: { rkey: string }[] }
+    expect(body.events.map((e) => e.rkey).sort()).toEqual(['d1', 'd2'])
+  })
+
+  test('since + until together select a window', async () => {
+    await seedTimeline()
+    const res = await xrpc('getEvents', { since: '2026-01-15T00:00:00Z', until: '2026-02-15T00:00:00Z' })
+    const body = (await res.json()) as { events: { rkey: string }[] }
+    expect(body.events.map((e) => e.rkey)).toEqual(['d2'])
+  })
+
+  test('bad since → InvalidRequest', async () => {
+    const res = await xrpc('getEvents', { since: 'not-a-date' })
+    expect(res.status).toBe(400)
+    expect(((await res.json()) as { error: string }).error).toBe('InvalidRequest')
+  })
+
+  test('order=desc returns newest-first', async () => {
+    await seed()
+    const res = await xrpc('getEvents', { order: 'desc' })
+    const body = (await res.json()) as { events: { rkey: string }[] }
+    expect(body.events.map((e) => e.rkey)).toEqual(['sub-1', 'd2', 'd1'])
+  })
+
+  test('order=desc cursor pages backwards through the log', async () => {
+    await seed()
+    const first = (await (await xrpc('getEvents', { order: 'desc', limit: '2' })).json()) as {
+      events: { rkey: string }[]
+      cursor: string
+    }
+    expect(first.events.map((e) => e.rkey)).toEqual(['sub-1', 'd2'])
+
+    const next = (await (await xrpc('getEvents', { order: 'desc', cursor: first.cursor })).json()) as {
+      events: { rkey: string }[]
+    }
+    expect(next.events.map((e) => e.rkey)).toEqual(['d1'])
+  })
+
+  test('bad order → InvalidRequest', async () => {
+    const res = await xrpc('getEvents', { order: 'sideways' })
     expect(res.status).toBe(400)
     expect(((await res.json()) as { error: string }).error).toBe('InvalidRequest')
   })
