@@ -54,12 +54,16 @@ export class Ingester {
     this.connect(url.toString())
   }
 
+  /**
+   * Fast shutdown: finish the in-flight batch only. Everything still buffered
+   * stays unacked, so Tab redelivers it on next boot and the idempotent
+   * upsert absorbs it — draining a large backlog here would block exit.
+   */
   async stop(): Promise<void> {
     this.stopped = true
     if (this.flushTimer) clearTimeout(this.flushTimer)
-    await this.flushPromise
-    await this.flush()
     this.ws?.close()
+    await this.flushPromise
   }
 
   private connect(url: string): void {
@@ -126,7 +130,7 @@ export class Ingester {
   }
 
   private async flush(): Promise<void> {
-    while (this.pending.length > 0) {
+    while (this.pending.length > 0 && !this.stopped) {
       const batch = this.pending.splice(0, this.batchSize)
       await this.commitWithRetry(batch)
       for (const { eventId } of batch) this.ack(eventId)

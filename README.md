@@ -65,6 +65,30 @@ Useful flags: `include_deleted=1` (see soft-deleted records), `cursor` (paginati
 | `GET /api/v1/records/…/links` | Outgoing AT Proto references extracted from the record |
 | `GET /api/v1/records/…/backlinks` | Records in the archive that reference this one |
 | `GET /api/v1/records/…/backlinks/network` | Network-wide backlinks via Constellation (cached, serve-stale) |
+| `GET /api/v1/types` | Inventory of `$type` values observed in the archive, by path, with counts |
+| `GET /api/v1/types/:nsid` | Usage + resolved lexicon schema + derived text fields + observed union members |
+| `GET /api/v1/events` | Cursor-paged change log — poll it to react to new/updated/deleted records |
+
+### Filtering by record content
+
+Any endpoint that returns records accepts `record.<path>=<value>` params matching against the record JSON:
+
+```bash
+# all documents whose content block is Offprint's
+curl … "localhost:3000/api/v1/records?record.content.\$type=app.offprint.content"
+# semantic search within that slice
+curl … "localhost:3000/api/v1/search/semantic?q=ai+filmmaking&record.content.\$type=app.offprint.content"
+```
+
+Use `GET /api/v1/types` to discover which `$type` values exist before filtering.
+
+### Consuming changes (Laravel etc.)
+
+`GET /api/v1/events?cursor=<last-seen>&collection=…&include_record=1` returns applied changes in order with a resumable cursor — poll it from a scheduled job, persist the cursor, replay any time by rewinding it. The log only contains *applied* changes (redelivered/stale sync events never appear), so consumers see no duplicates. Batched webhook push is planned (LAB-15).
+
+### Dev mode
+
+`RESERVOIR_DEV_MODE=true` disables API auth entirely (loud warning at boot). Local development only.
 
 ## Status
 
@@ -75,4 +99,4 @@ Useful flags: `include_deleted=1` (see soft-deleted records), `cursor` (paginati
 - Keyword + semantic search return sensible results (`q=atproto` → "Deconstructing atproto Blog Storage"); embeddings drain on CPU Ollama
 - Internal link graph extracted at ingest (16k+ links); most-linked publication showed 200 archive backlinks; Constellation integration confirmed cached + serve-stale
 
-**Caveats / follow-ups:** `@atproto/tap`'s TapChannel doesn't run under Bun (uses `ws` streams) — replaced with a ~200-line native WebSocket consumer, wire protocol is trivial. Some publishers store document bodies as rich block content (e.g. `blog.pckt.content`) rather than `textContent`, so only title/description get indexed for those — needs per-lexicon extractors. Stress test on a $5/mo VPS still pending.
+**Caveats / follow-ups:** `@atproto/tap`'s TapChannel doesn't run under Bun (uses `ws` streams) — replaced with a ~200-line native WebSocket consumer, wire protocol is trivial. Some publishers store document bodies as rich block content (e.g. `blog.pckt.content`) rather than `textContent`, so only title/description get FTS/embedded for those — the type inventory + lexicon registry (`/api/v1/types/:nsid`) already derives the extraction map (observed union members + their text fields); wiring it into the embed pipeline is LAB-10. Batched webhooks (LAB-15), dynamic audiences (LAB-16), Laravel package (LAB-17), and the $5/mo VPS stress test (LAB-9) are tracked in Linear.

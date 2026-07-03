@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm'
 import {
   bigint,
   bigserial,
+  boolean,
   customType,
   index,
   integer,
@@ -106,6 +107,27 @@ export const lexiconSchemas = pgTable('lexicon_schemas', {
   error: text('error'),
   resolvedAt: timestamp('resolved_at', { withTimezone: true }).notNull().defaultNow(),
 })
+
+export const events = pgTable(
+  'events',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    recordId: bigint('record_id', { mode: 'number' })
+      .notNull()
+      .references(() => records.id, { onDelete: 'cascade' }),
+    did: varchar('did', { length: 255 }).notNull(),
+    collection: varchar('collection', { length: 255 }).notNull(),
+    rkey: varchar('rkey', { length: 255 }).notNull(),
+    action: varchar('action', { length: 20 }).notNull(),
+    rev: varchar('rev', { length: 255 }),
+    live: boolean('live').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('events_collection_id_idx').on(table.collection, table.id),
+    index('events_did_id_idx').on(table.did, table.id),
+  ],
+)
 
 export const constellationCache = pgTable('constellation_cache', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),

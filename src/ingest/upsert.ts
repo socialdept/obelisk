@@ -1,7 +1,7 @@
 import { and, eq } from 'drizzle-orm'
 import type { ReservoirConfig } from '../config'
 import type { Db } from '../db/client'
-import { recordLinks, recordTypes, records } from '../db/schema'
+import { events, recordLinks, recordTypes, records } from '../db/schema'
 import { extractLinks } from './links'
 import { extractTypes } from './types'
 
@@ -55,22 +55,28 @@ export async function applyEvent(
 }
 
 async function applyDelete(tx: Tx, event: RecordEvent, existingId?: number): Promise<UpsertResult> {
-  if (!existingId) {
+  let recordId = existingId
+  if (recordId) {
+    await tx
+      .update(records)
+      .set({ deletedAt: new Date(), rev: event.rev })
+      .where(eq(records.id, recordId))
+  } else {
     // Delete for a record we never saw — store a tombstone so the deletion is remembered.
-    await tx.insert(records).values({
-      did: event.did,
-      collection: event.collection,
-      rkey: event.rkey,
-      rev: event.rev,
-      deletedAt: new Date(),
-    })
-    return 'applied'
+    const inserted = await tx
+      .insert(records)
+      .values({
+        did: event.did,
+        collection: event.collection,
+        rkey: event.rkey,
+        rev: event.rev,
+        deletedAt: new Date(),
+      })
+      .returning({ id: records.id })
+    recordId = inserted[0]!.id
   }
 
-  await tx
-    .update(records)
-    .set({ deletedAt: new Date(), rev: event.rev })
-    .where(eq(records.id, existingId))
+  await logEvent(tx, recordId, event)
   return 'applied'
 }
 
@@ -106,7 +112,21 @@ async function applyWrite(
 
   await replaceLinks(tx, recordId, event.record)
   await replaceTypes(tx, recordId, event.record)
+  await logEvent(tx, recordId, event)
   return 'applied'
+}
+
+/** Append to the event log — same transaction, so consumers only ever see applied changes. */
+async function logEvent(tx: Tx, recordId: number, event: RecordEvent): Promise<void> {
+  await tx.insert(events).values({
+    recordId,
+    did: event.did,
+    collection: event.collection,
+    rkey: event.rkey,
+    action: event.action,
+    rev: event.rev,
+    live: event.live,
+  })
 }
 
 async function replaceLinks(tx: Tx, recordId: number, record: Record<string, unknown> | null): Promise<void> {
