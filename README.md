@@ -135,6 +135,16 @@ curl -X POST -H "$A" "localhost:3000/xrpc/social.dept.obelisk.addWatchedDid" -d 
 
 There is **no `%`-of-network** — `reposTotal` is always `null`. No atproto service exposes a per-collection record or repo count (Constellation only counts *backlinks to* a target; `site.standard.document` is a link source, so it's uncountable there), and Tab's tracked-repo count isn't wired yet. `complete` is inferred from the historical stream draining, which is robust to quiet repos but also reads a stalled ingester (Tab down) as done — check `lastHistoricalEventAt` to disambiguate.
 
+### DID-scoped backfill (whole repo, on demand)
+
+Archive a DID's **entire repo across every collection** — independent of the network sync filter — by fetching `com.atproto.sync.getRepo` and replaying every record through the normal ingest path:
+
+```bash
+bun run scripts/backfill-repo.ts did:plc:…
+```
+
+Every record is stamped with the repo's commit `rev`, so the import is **idempotent** (re-run = no-op) and a newer live event always wins over the snapshot — a forward delete is never resurrected. Records land `embed_status='pending'`; the running app's embed worker fills embeddings for the ones with prose. If the DID is in `watched_dids`, `snapshot_at` is stamped on success (the "deleted coverage starts here" bound `getFootprint` reports). The CAR is parsed with `@atcute/repo` (Bun-native; `@atproto/repo` pulls a `@noble/hashes` export Bun can't resolve). Large repos are buffered in memory — fine for typical repos; a streaming reader is the next step if that bites.
+
 ### Filtering by record content
 
 Collection-plane queries filter against record JSON via the `where` DSL (dot paths like `content.$type`):

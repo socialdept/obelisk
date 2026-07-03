@@ -51,7 +51,7 @@ async function resolveAuthorityDid(authority: string, deps: ResolverDeps): Promi
   throw new Error(`no _lexicon TXT record for ${authority}`)
 }
 
-async function resolvePds(did: string, deps: ResolverDeps): Promise<string> {
+export async function resolvePds(did: string, deps: ResolverDeps = defaultDeps): Promise<string> {
   const doc = (await deps.fetchJson(didDocUrl(did))) as {
     service?: { id: string; type: string; serviceEndpoint: string }[]
   }

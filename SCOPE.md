@@ -69,6 +69,10 @@ holds; the collection plane's write verbs stay `MethodNotImplemented`.
 - Backfill progress (`getBackfillStatus`, LAB-34) — read off the event log via
   Tab's `live:false→true` cutover; drain-based `complete`. No `%`-of-network:
   no atproto service exposes a per-collection count (`reposTotal` stays null).
+- DID-scoped backfill (`scripts/backfill-repo.ts`, LAB-28) — one-shot full-repo
+  import via `com.atproto.sync.getRepo`, every collection, through the existing
+  `applyEvent` path (`@atcute/repo` CAR reader, Bun-native). Idempotent via the
+  commit `rev`; stamps `watched_dids.snapshot_at`. The footprint-audit primitive.
 - Dev mode, bearer-token auth
 
 ## In scope — now (closes the stated consumer needs)
