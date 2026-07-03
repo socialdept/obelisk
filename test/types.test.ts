@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { deriveTextFields } from '../src/api/routes/types'
+import { deriveTextFields } from '../src/lexicon/fields'
 import { extractTypes } from '../src/ingest/types'
 import { nsidAuthority, resolveLexicon } from '../src/lexicon/resolver'
 
@@ -95,8 +95,8 @@ describe('resolveLexicon', () => {
 })
 
 describe('deriveTextFields', () => {
-  test('collects string properties from defs including nested arrays', () => {
-    const fields = deriveTextFields({
+  test('collects string properties from defs including nested arrays', async () => {
+    const fields = await deriveTextFields({
       lexicon: 1,
       id: 'blog.pckt.content',
       defs: {
@@ -113,10 +113,87 @@ describe('deriveTextFields', () => {
       },
     })
 
-    expect(fields).toEqual(['items[].plaintext', '#block.caption'])
+    expect(fields).toEqual(['#block.caption', 'items[].plaintext'])
   })
 
-  test('returns empty for schemas without defs', () => {
-    expect(deriveTextFields({ lexicon: 1 })).toEqual([])
+  test('returns empty for schemas without defs', async () => {
+    expect(await deriveTextFields({ lexicon: 1 })).toEqual([])
+  })
+
+  test('follows local refs', async () => {
+    const fields = await deriveTextFields({
+      lexicon: 1,
+      id: 'com.example.doc',
+      defs: {
+        main: {
+          type: 'object',
+          properties: { body: { type: 'ref', ref: '#textBlock' } },
+        },
+        textBlock: { type: 'object', properties: { text: { type: 'string' } } },
+      },
+    })
+
+    expect(fields).toContain('body.text')
+  })
+
+  test('follows union refs across external schemas', async () => {
+    const external: Record<string, unknown> = {
+      'com.example.para': {
+        lexicon: 1,
+        id: 'com.example.para',
+        defs: { main: { type: 'object', properties: { plaintext: { type: 'string' } } } },
+      },
+    }
+
+    const fields = await deriveTextFields(
+      {
+        lexicon: 1,
+        id: 'com.example.doc',
+        defs: {
+          main: {
+            type: 'object',
+            properties: {
+              items: { type: 'array', items: { type: 'union', refs: ['com.example.para'], closed: false } },
+            },
+          },
+        },
+      },
+      async (nsid) => external[nsid] ?? null,
+    )
+
+    expect(fields).toEqual(['items[].plaintext'])
+  })
+
+  test('survives circular refs', async () => {
+    const fields = await deriveTextFields({
+      lexicon: 1,
+      id: 'com.example.tree',
+      defs: {
+        main: {
+          type: 'object',
+          properties: {
+            label: { type: 'string' },
+            children: { type: 'array', items: { type: 'ref', ref: '#main' } },
+          },
+        },
+      },
+    })
+
+    expect(fields).toEqual(['label'])
+  })
+
+  test('open unions with no refs derive nothing', async () => {
+    const fields = await deriveTextFields({
+      lexicon: 1,
+      id: 'blog.pckt.content',
+      defs: {
+        main: {
+          type: 'object',
+          properties: { items: { type: 'array', items: { type: 'union', refs: [], closed: false } } },
+        },
+      },
+    })
+
+    expect(fields).toEqual([])
   })
 })

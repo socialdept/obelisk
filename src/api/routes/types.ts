@@ -1,7 +1,10 @@
 import { Hono } from 'hono'
 import { sql } from 'drizzle-orm'
 import type { Db } from '../../db/client'
+import { deriveTextFields, type ExternalResolver } from '../../lexicon/fields'
 import type { LexiconRegistry } from '../../lexicon/registry'
+
+const MAX_MEMBERS = 10
 
 export function typesRoutes(db: Db, registry: LexiconRegistry): Hono {
   const app = new Hono()
@@ -32,6 +35,7 @@ export function typesRoutes(db: Db, registry: LexiconRegistry): Hono {
 
   app.get('/:nsid', async (c) => {
     const nsid = c.req.param('nsid')
+    const resolveExternal: ExternalResolver = async (ref) => (await registry.get(ref)).schema
 
     const usage = await db.execute<{ path: string; collection: string; count: string }>(sql`
       SELECT rt.path, r.collection, count(*) AS count
@@ -43,6 +47,8 @@ export function typesRoutes(db: Db, registry: LexiconRegistry): Hono {
     `)
 
     const entry = await registry.get(nsid)
+    const textFields = entry.schema ? await deriveTextFields(entry.schema, resolveExternal) : null
+    const members = await observedMembers(db, nsid, resolveExternal)
 
     return c.json({
       nsid,
@@ -50,7 +56,8 @@ export function typesRoutes(db: Db, registry: LexiconRegistry): Hono {
       lexicon: entry.schema,
       lexiconError: entry.error,
       resolvedAt: entry.resolvedAt,
-      textFields: entry.schema ? deriveTextFields(entry.schema) : null,
+      textFields,
+      members,
     })
   })
 
@@ -58,36 +65,36 @@ export function typesRoutes(db: Db, registry: LexiconRegistry): Hono {
 }
 
 /**
- * Best-effort list of string-typed property paths in a lexicon's defs —
- * a starting point for content extraction (LAB-10), not a full lex parser.
+ * $types observed nested inside this type's records (same record, deeper
+ * path) — fills the gap lexicons can't: open unions like pckt's
+ * `items: {type: 'union', refs: []}` only reveal their members in real data.
  */
-export function deriveTextFields(schema: unknown): string[] {
-  const fields: string[] = []
-  const defs = (schema as { defs?: Record<string, unknown> }).defs
-  if (!defs) return fields
+async function observedMembers(db: Db, nsid: string, resolveExternal: ExternalResolver) {
+  const rows = await db.execute<{ path: string; nsid: string; count: string }>(sql`
+    SELECT rt_child.path, rt_child.nsid, count(*) AS count
+    FROM record_types rt_parent
+    JOIN record_types rt_child ON rt_child.record_id = rt_parent.record_id
+    WHERE rt_parent.nsid = ${nsid}
+      AND rt_child.path <> rt_parent.path
+      AND rt_child.path LIKE (
+        CASE WHEN rt_parent.path = '$type' THEN ''
+             ELSE left(rt_parent.path, length(rt_parent.path) - length('.$type'))
+        END || '%'
+      )
+    GROUP BY rt_child.path, rt_child.nsid
+    ORDER BY count(*) DESC
+    LIMIT ${MAX_MEMBERS}
+  `)
 
-  for (const [defName, def] of Object.entries(defs)) {
-    collectStrings(def, defName === 'main' ? '' : `#${defName}`, fields)
-  }
-  return fields
-}
-
-function collectStrings(node: unknown, path: string, fields: string[]): void {
-  if (node === null || typeof node !== 'object') return
-
-  const typed = node as { type?: string; properties?: Record<string, unknown>; items?: unknown; record?: unknown }
-
-  if (typed.record) collectStrings(typed.record, path, fields)
-  if (typed.items) collectStrings(typed.items, `${path}[]`, fields)
-
-  if (!typed.properties) return
-  for (const [name, prop] of Object.entries(typed.properties)) {
-    const propPath = path === '' ? name : `${path}.${name}`
-    const propType = (prop as { type?: string }).type
-    if (propType === 'string') {
-      fields.push(propPath)
-      continue
-    }
-    collectStrings(prop, propPath, fields)
-  }
+  return Promise.all(
+    rows.map(async (row) => {
+      const schema = await resolveExternal(row.nsid).catch(() => null)
+      return {
+        nsid: row.nsid,
+        path: row.path,
+        count: Number(row.count),
+        textFields: schema ? await deriveTextFields(schema, resolveExternal) : null,
+      }
+    }),
+  )
 }
