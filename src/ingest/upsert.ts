@@ -1,0 +1,117 @@
+import { and, eq } from 'drizzle-orm'
+import type { ReservoirConfig } from '../config'
+import type { Db } from '../db/client'
+import { recordLinks, records } from '../db/schema'
+import { extractLinks } from './links'
+
+/** A record event as delivered by Tap/Tab. Parsed tolerantly — see normalizeEvent. */
+export interface RecordEvent {
+  type: string
+  did: string
+  collection: string
+  rkey: string
+  action: 'create' | 'update' | 'delete'
+  record: Record<string, unknown> | null
+  cid: string | null
+  rev: string | null
+  live: boolean
+}
+
+export type UpsertResult = 'applied' | 'skipped'
+
+type Tx = Db | Parameters<Parameters<Db['transaction']>[0]>[0]
+
+/**
+ * Idempotently apply a single Tap/Tab record event.
+ * Safe under at-least-once redelivery: an event with a rev not newer
+ * than the stored row is a no-op.
+ */
+export async function applyEvent(
+  tx: Tx,
+  config: ReservoirConfig,
+  event: RecordEvent,
+): Promise<UpsertResult> {
+  if (event.type !== 'record') return 'skipped'
+
+  const existing = await tx
+    .select({ id: records.id, rev: records.rev, cid: records.cid })
+    .from(records)
+    .where(
+      and(
+        eq(records.did, event.did),
+        eq(records.collection, event.collection),
+        eq(records.rkey, event.rkey),
+      ),
+    )
+    .limit(1)
+    .then((rows) => rows[0])
+
+  if (existing && existing.rev && event.rev && event.rev <= existing.rev) return 'skipped'
+
+  if (event.action === 'delete') return applyDelete(tx, event, existing?.id)
+
+  return applyWrite(tx, config, event, existing)
+}
+
+async function applyDelete(tx: Tx, event: RecordEvent, existingId?: number): Promise<UpsertResult> {
+  if (!existingId) {
+    // Delete for a record we never saw — store a tombstone so the deletion is remembered.
+    await tx.insert(records).values({
+      did: event.did,
+      collection: event.collection,
+      rkey: event.rkey,
+      rev: event.rev,
+      deletedAt: new Date(),
+    })
+    return 'applied'
+  }
+
+  await tx
+    .update(records)
+    .set({ deletedAt: new Date(), rev: event.rev })
+    .where(eq(records.id, existingId))
+  return 'applied'
+}
+
+async function applyWrite(
+  tx: Tx,
+  config: ReservoirConfig,
+  event: RecordEvent,
+  existing: { id: number; cid: string | null } | undefined,
+): Promise<UpsertResult> {
+  const contentChanged = !existing || existing.cid !== event.cid
+  const embeddable = (config.collections[event.collection]?.textFields?.length ?? 0) > 0
+
+  const row = {
+    cid: event.cid,
+    rev: event.rev,
+    record: event.record ?? {},
+    deletedAt: null,
+    indexedAt: new Date(),
+    ...(contentChanged && { embedStatus: embeddable ? 'pending' : 'skipped', embedAttempts: 0 }),
+  }
+
+  let recordId: number
+  if (existing) {
+    await tx.update(records).set(row).where(eq(records.id, existing.id))
+    recordId = existing.id
+  } else {
+    const inserted = await tx
+      .insert(records)
+      .values({ did: event.did, collection: event.collection, rkey: event.rkey, ...row })
+      .returning({ id: records.id })
+    recordId = inserted[0]!.id
+  }
+
+  await replaceLinks(tx, recordId, event.record)
+  return 'applied'
+}
+
+async function replaceLinks(tx: Tx, recordId: number, record: Record<string, unknown> | null): Promise<void> {
+  await tx.delete(recordLinks).where(eq(recordLinks.recordId, recordId))
+
+  const links = extractLinks(record ?? {})
+  if (links.length === 0) return
+
+  await tx.insert(recordLinks).values(links.map((link) => ({ recordId, ...link })))
+}
