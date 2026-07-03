@@ -60,7 +60,7 @@ Useful flags: `include_deleted=1` (see soft-deleted records), `cursor` (paginati
 |---|---|
 | `GET /api/v1/records` | List/filter archived records |
 | `GET /api/v1/records/:did/:collection/:rkey` | Fetch one record |
-| `GET /api/v1/search?q=` | Weighted full-text search (title > description > body) |
+| `GET /api/v1/search?q=` | Weighted full-text search (title > description > body, including rich-block content) |
 | `GET /api/v1/search/semantic?q=` | Vector search over chunked content (pgvector HNSW) |
 | `GET /api/v1/records/…/links` | Outgoing AT Proto references extracted from the record |
 | `GET /api/v1/records/…/backlinks` | Records in the archive that reference this one |
@@ -131,4 +131,4 @@ Definition kinds: `backlink` (DIDs with records linking to a target), `collectio
 - Keyword + semantic search return sensible results (`q=atproto` → "Deconstructing atproto Blog Storage"); embeddings drain on CPU Ollama
 - Internal link graph extracted at ingest (16k+ links); most-linked publication showed 200 archive backlinks; Constellation integration confirmed cached + serve-stale
 
-**Caveats / follow-ups:** `@atproto/tap`'s TapChannel doesn't run under Bun (uses `ws` streams) — replaced with a ~200-line native WebSocket consumer, wire protocol is trivial. Some publishers store document bodies as rich block content (e.g. `blog.pckt.content`) rather than `textContent`, so only title/description get FTS/embedded for those — the type inventory + lexicon registry (`/api/v1/types/:nsid`) already derives the extraction map (observed union members + their text fields); wiring it into the embed pipeline is LAB-10. Batched webhooks (LAB-15), dynamic audiences (LAB-16), Laravel package (LAB-17), and the $5/mo VPS stress test (LAB-9) are tracked in Linear.
+**Caveats / follow-ups:** `@atproto/tap`'s TapChannel doesn't run under Bun (uses `ws` streams) — replaced with a ~200-line native WebSocket consumer, wire protocol is trivial. Rich-block document bodies (leaflet, pckt, logue, WordPress-HTML, markdown variants) are extracted via lexicon-derived text keys with a default-key fallback, stored in `records.extracted_text`, and included in FTS + embeddings — extraction happens in the embed worker, so search coverage for a record lags its ingestion by queue depth. Laravel package (LAB-17) and the $5/mo VPS stress test (LAB-9) are tracked in Linear, along with audience expansion (outlink/following feeds, combinators, thresholds).

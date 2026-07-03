@@ -5,6 +5,7 @@ import type { Db } from '../db/client'
 import { recordEmbeddings, records } from '../db/schema'
 import { chunkText } from './chunk'
 import { extractText } from './extract'
+import { extractRichText, type TextKeysResolver } from './rich'
 import type { OllamaClient } from './ollama'
 
 const MAX_ATTEMPTS = 3
@@ -12,6 +13,8 @@ const MAX_ATTEMPTS = 3
 export interface EmbedWorkerOptions {
   claimSize?: number
   idleMs?: number
+  /** Lexicon-driven text keys for rich content; falls back to defaults when absent. */
+  textKeys?: TextKeysResolver
 }
 
 /**
@@ -22,6 +25,7 @@ export interface EmbedWorkerOptions {
 export class EmbedWorker {
   private readonly claimSize: number
   private readonly idleMs: number
+  private readonly textKeys: TextKeysResolver
   private stopped = false
   private loopPromise: Promise<void> | null = null
 
@@ -33,6 +37,7 @@ export class EmbedWorker {
   ) {
     this.claimSize = options.claimSize ?? 10
     this.idleMs = options.idleMs ?? 2000
+    this.textKeys = options.textKeys ?? (async () => null)
   }
 
   start(): void {
@@ -90,7 +95,11 @@ export class EmbedWorker {
       return
     }
 
-    const text = extractText(this.config, row.collection, row.record as Record<string, unknown>)
+    const recordJson = row.record as Record<string, unknown>
+    const flat = extractText(this.config, row.collection, recordJson)
+    const rich = await extractRichText(recordJson, this.textKeys)
+    const text = [flat, rich].filter((part) => part !== '').join('\n\n')
+
     if (text === '') {
       await this.setStatus(recordId, 'skipped')
       return
@@ -111,7 +120,10 @@ export class EmbedWorker {
             embedding: vectors[i]!,
           })),
         )
-        await tx.update(records).set({ embedStatus: 'done' }).where(eq(records.id, recordId))
+        await tx
+          .update(records)
+          .set({ embedStatus: 'done', extractedText: rich === '' ? null : rich })
+          .where(eq(records.id, recordId))
       })
     } catch (err) {
       const attempts = row.attempts + 1
