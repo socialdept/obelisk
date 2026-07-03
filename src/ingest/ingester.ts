@@ -1,0 +1,199 @@
+import type { ReservoirConfig } from '../config'
+import type { Db } from '../db/client'
+import { applyEvent, type RecordEvent } from './upsert'
+
+export interface IngesterOptions {
+  batchSize?: number
+  flushMs?: number
+  maxReconnectMs?: number
+}
+
+interface PendingEvent {
+  event: RecordEvent
+  eventId: number
+}
+
+/**
+ * Consumes a Tab websocket (ws://host:2480/channel) with acks and applies
+ * events in micro-batched transactions. Acks are sent only after the batch
+ * commits, so a crash never loses events — Tab redelivers anything unacked
+ * (TAB_RETRY_TIMEOUT) and the idempotent upsert absorbs duplicates.
+ *
+ * Uses Bun's native WebSocket: @atproto/tap's channel depends on ws streams
+ * Bun doesn't implement. Wire protocol is plain JSON events in,
+ * `{"type":"ack","id":n}` back.
+ */
+export class Ingester {
+  private readonly batchSize: number
+  private readonly flushMs: number
+  private readonly maxReconnectMs: number
+
+  private ws: WebSocket | null = null
+  private pending: PendingEvent[] = []
+  private flushTimer: ReturnType<typeof setTimeout> | null = null
+  private flushPromise: Promise<void> | null = null
+  private stopped = false
+  private reconnectAttempt = 0
+
+  private stats = { applied: 0, skipped: 0, lastLogged: 0 }
+
+  constructor(
+    private readonly db: Db,
+    private readonly config: ReservoirConfig,
+    options: IngesterOptions = {},
+  ) {
+    this.batchSize = options.batchSize ?? 200
+    this.flushMs = options.flushMs ?? 500
+    this.maxReconnectMs = options.maxReconnectMs ?? 30_000
+  }
+
+  start(tabWsUrl: string): void {
+    const url = new URL(tabWsUrl)
+    url.protocol = url.protocol === 'wss:' ? 'wss:' : 'ws:'
+    url.pathname = '/channel'
+    this.connect(url.toString())
+  }
+
+  async stop(): Promise<void> {
+    this.stopped = true
+    if (this.flushTimer) clearTimeout(this.flushTimer)
+    await this.flushPromise
+    await this.flush()
+    this.ws?.close()
+  }
+
+  private connect(url: string): void {
+    if (this.stopped) return
+    console.log(`ingester: connecting to ${url}`)
+
+    const ws = new WebSocket(url)
+    this.ws = ws
+
+    ws.onopen = () => {
+      this.reconnectAttempt = 0
+      console.log('ingester: connected')
+    }
+
+    ws.onmessage = (msg) => this.handleMessage(String(msg.data))
+
+    ws.onclose = () => {
+      if (this.stopped) return
+      this.reconnectAttempt += 1
+      const delay = Math.min(1000 * 2 ** this.reconnectAttempt, this.maxReconnectMs)
+      console.log(`ingester: disconnected, reconnecting in ${delay}ms`)
+      setTimeout(() => this.connect(url), delay)
+    }
+
+    ws.onerror = (err) => console.error('ingester: socket error', err)
+  }
+
+  private handleMessage(data: string): void {
+    let parsed: TapWireEvent
+    try {
+      parsed = JSON.parse(data) as TapWireEvent
+    } catch (err) {
+      console.error('ingester: unparseable message', err)
+      return
+    }
+
+    if (parsed.type !== 'record' || !parsed.record) {
+      this.ack(parsed.id)
+      return
+    }
+
+    this.pending.push({ event: normalizeEvent(parsed.record), eventId: parsed.id })
+
+    if (this.pending.length >= this.batchSize) {
+      this.triggerFlush()
+      return
+    }
+    if (!this.flushTimer) {
+      this.flushTimer = setTimeout(() => this.triggerFlush(), this.flushMs)
+    }
+  }
+
+  private triggerFlush(): void {
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer)
+      this.flushTimer = null
+    }
+    if (this.flushPromise) return
+
+    this.flushPromise = this.flush().finally(() => {
+      this.flushPromise = null
+      if (this.pending.length >= this.batchSize && !this.stopped) this.triggerFlush()
+    })
+  }
+
+  private async flush(): Promise<void> {
+    while (this.pending.length > 0) {
+      const batch = this.pending.splice(0, this.batchSize)
+      await this.commitWithRetry(batch)
+      for (const { eventId } of batch) this.ack(eventId)
+      this.logProgress()
+    }
+  }
+
+  private async commitWithRetry(batch: PendingEvent[]): Promise<void> {
+    let attempt = 0
+    for (;;) {
+      try {
+        await this.db.transaction(async (tx) => {
+          for (const { event } of batch) {
+            const result = await applyEvent(tx, this.config, event)
+            if (result === 'applied') this.stats.applied += 1
+            else this.stats.skipped += 1
+          }
+        })
+        return
+      } catch (err) {
+        attempt += 1
+        const delay = Math.min(1000 * 2 ** attempt, 30_000)
+        console.error(`ingester: batch commit failed (attempt ${attempt}), retrying in ${delay}ms`, err)
+        await Bun.sleep(delay)
+      }
+    }
+  }
+
+  /** Best-effort: if the socket is down, Tab redelivers and the upsert dedupes. */
+  private ack(eventId: number): void {
+    if (this.ws?.readyState !== WebSocket.OPEN) return
+    this.ws.send(JSON.stringify({ type: 'ack', id: eventId }))
+  }
+
+  private logProgress(): void {
+    const total = this.stats.applied + this.stats.skipped
+    if (total - this.stats.lastLogged < 1000) return
+    this.stats.lastLogged = total
+    console.log(`ingester: ${this.stats.applied} applied, ${this.stats.skipped} skipped`)
+  }
+}
+
+interface TapWireEvent {
+  id: number
+  type: string
+  record?: {
+    did: string
+    rev: string
+    collection: string
+    rkey: string
+    action: 'create' | 'update' | 'delete'
+    record?: Record<string, unknown>
+    cid?: string
+    live: boolean
+  }
+}
+
+function normalizeEvent(data: NonNullable<TapWireEvent['record']>): RecordEvent {
+  return {
+    type: 'record',
+    did: data.did,
+    collection: data.collection,
+    rkey: data.rkey,
+    action: data.action,
+    record: data.record ?? null,
+    cid: data.cid ?? null,
+    rev: data.rev ?? null,
+    live: data.live,
+  }
+}

@@ -15,5 +15,18 @@ services:
       timeout: 3s
       retries: 10
 
+  tab:
+    image: fatfingers23/tab:latest
+    ports:
+      - "2480:2480"
+    environment:
+      TAB_DATABASE_URL: sqlite:///data/tab.db
+      TAB_LIGHT_RAIL_URL: https://lightrail.microcosm.blue
+      TAB_LIGHT_RAIL_SIGNAL_COLLECTIONS: site.standard.document,site.standard.publication,site.standard.graph.subscription,site.standard.graph.recommend
+      TAB_COLLECTION_FILTERS: site.standard.*
+    volumes:
+      - tabdata:/data
+
 volumes:
   pgdata: {}
+  tabdata: {}
