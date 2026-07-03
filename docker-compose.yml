@@ -17,6 +17,7 @@ services:
 
   tab:
     image: fatfingers23/tab:latest
+    restart: unless-stopped
     ports:
       - "2480:2480"
     environment:
