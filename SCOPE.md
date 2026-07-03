@@ -66,6 +66,9 @@ holds; the collection plane's write verbs stay `MethodNotImplemented`.
 - Type inventory + lexicon registry (`getTypes`), lexicon-derived extraction
 - Event log + cursor pull API (`getEvents`: `since`/`until` time bounds, `asc`/`desc`
   ordering — "when did publications we maintain change their records"), batched HMAC webhooks
+- Event backfill (`backfillEvents`, LAB-18) — seed synthetic `create`/`delete` events for
+  archived records that predate the log, so a `cursor=start` consumer sees history it
+  otherwise misses. Idempotent (`NOT EXISTS` guard), `live:false` marks them historical.
 - Audiences (backlink / outlink / collection / static) and following feeds
 - Backfill progress (`getBackfillStatus`, LAB-34) — read off the event log via
   Tab's `live:false→true` cutover; drain-based `complete`. No `%`-of-network:
@@ -95,7 +98,7 @@ holds; the collection plane's write verbs stay `MethodNotImplemented`.
 
 - Audience combinators, `active`/threshold kinds, 2-hop graph audiences
   (LAB-21–24) — the recommendation/counting roadmap
-- Event backfill endpoint (LAB-18), webhook 413 handling (LAB-19),
+- Webhook 413 handling (LAB-19),
   GIN-indexed JSON filters (LAB-11)
 - VPS stress test + minimum-viable-box verdict (LAB-9)
 

@@ -23,7 +23,7 @@ import {
   type ManageResult,
 } from '../../webhooks/manage'
 import { backfillStatus } from '../backfill'
-import { queryEvents } from '../routes/events'
+import { backfillEvents, queryEvents } from '../routes/events'
 import { getRecordLinks, queryBacklinks, queryNetworkBacklinks } from '../routes/links'
 import { getTypeDetail, getTypeInventory } from '../routes/types'
 import {
@@ -56,8 +56,8 @@ export interface ServiceDeps {
  *   • queries    (GET)  — reads: events, type inventory, link graph, footprint,
  *                         and management list/get.
  *   • procedures (POST) — mutations against Obelisk's OWN Postgres (webhooks,
- *                         audiences, watched DIDs). This never writes to a PDS —
- *                         hard-boundary #2 is intact.
+ *                         audiences, watched DIDs, event backfill). This never
+ *                         writes to a PDS — hard-boundary #2 is intact.
  *
  * Unknown verbs return MethodNotImplemented; the PDS write ban keeps the
  * collection plane's createRecord/etc unimplemented.
@@ -125,6 +125,8 @@ export function handleServiceMethod(verb: string, c: XrpcContext, deps: ServiceD
       return respondFromBody(c, (body) => updateWatched(deps.db, deps.tab, body))
     case 'removeWatchedDid':
       return respondFromBody(c, (body) => removeWatched(deps.db, deps.tab, body.did))
+    case 'backfillEvents':
+      return respondFromBody(c, (body) => backfillEvents(deps.db, body))
 
     default:
       return xrpcError(c, 501, 'MethodNotImplemented', `unknown ${SERVICE_NS} method: ${verb || '(none)'}`)

@@ -121,9 +121,11 @@ Obelisk's own cross-collection / archive operations, under the owned authority `
 | `addWatchedDid` | `{did, note?, collections?}` | Watch a DID across *all* collections; best-effort enrolls it in the footprint Tab (`/repos/add`, backfill + forward capture). The table is the source of truth. |
 | `updateWatchedDid` | `{did, note?, collections?, active?}` | Reactivate re-enrolls; deactivate un-enrolls |
 | `removeWatchedDid` | `{did}` | Un-watch + un-enroll |
+| `backfillEvents` | `{collection?, did?, where?, includeDeleted?}` | Seed synthetic `create` (or `delete`) events for archived records that predate the event log, so a `cursor=start` consumer sees them. Idempotent (`NOT EXISTS` guard); `live:false` marks them historical. Returns `{seeded}` |
 
 ```bash
 curl -H "$A" "localhost:6060/xrpc/social.dept.obelisk.getEvents?cursor=0&collection=site.standard.document"
+curl -X POST -H "$A" "localhost:6060/xrpc/social.dept.obelisk.backfillEvents" -d '{"collection": "site.standard.document"}'
 curl -H "$A" "localhost:6060/xrpc/social.dept.obelisk.getFootprint?did=did:plc:…&includeDeleted=1"
 curl -H "$A" "localhost:6060/xrpc/social.dept.obelisk.getBackfillStatus?collection=site.standard.document"
 curl -X POST -H "$A" "localhost:6060/xrpc/social.dept.obelisk.addWatchedDid" -d '{"did": "did:plc:…"}'

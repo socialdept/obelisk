@@ -1,9 +1,11 @@
-import { and, asc, desc, eq, gt, gte, lt, lte, sql, type SQL } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, gte, isNull, lt, lte, sql, type SQL } from 'drizzle-orm'
 import { audienceFilter, findAudience } from '../../audiences/definition'
 import type { ObeliskConfig } from '../../config'
 import type { Db } from '../../db/client'
 import { events, records } from '../../db/schema'
 import { buildFeedFilter, linkFilters } from '../../feeds/filter'
+import type { ManageResult } from '../../webhooks/manage'
+import { whereFilters, type WhereClause } from '../xrpc/where'
 import { recordJsonFilters } from './records'
 
 const MAX_LIMIT = 500
@@ -100,4 +102,55 @@ function parseEventLimit(raw: string | undefined): number {
   const limit = Number(raw ?? 200)
   if (!Number.isInteger(limit) || limit < 1) return 200
   return Math.min(limit, MAX_LIMIT)
+}
+
+export interface BackfillEventsInput {
+  collection?: string
+  did?: string
+  where?: WhereClause
+  includeDeleted?: boolean
+}
+
+/**
+ * Seed synthetic events for archived records that have **no events** — records
+ * that predate the event log (the log starts at deploy; anything ingested
+ * before it is invisible to a `cursor=start` consumer). Powers the
+ * `social.dept.obelisk.backfillEvents` service procedure.
+ *
+ * Matching records get a `create` event (or `delete` for tombstoned rows when
+ * `includeDeleted`), `live:false` to mark them historical, ordered by
+ * `records.id` so replay order ≈ archive order. The `NOT EXISTS` guard makes it
+ * idempotent — re-running only seeds records still missing an event.
+ */
+export async function backfillEvents(
+  db: Db,
+  input: BackfillEventsInput,
+): Promise<ManageResult<{ seeded: number }>> {
+  const filters: SQL[] = []
+  if (input.collection) filters.push(eq(records.collection, input.collection))
+  if (input.did) filters.push(eq(records.did, input.did))
+  if (!input.includeDeleted) filters.push(isNull(records.deletedAt))
+  if (input.where) {
+    const parsed = whereFilters(input.where)
+    if ('error' in parsed) return { error: 'InvalidRequest', message: parsed.error, status: 400 }
+    filters.push(...parsed)
+  }
+
+  const unseen = sql`NOT EXISTS (SELECT 1 FROM ${events} e WHERE e.record_id = ${records.id})`
+  const where = filters.length ? sql`${and(...filters)} AND ${unseen}` : unseen
+
+  const rows = await db.execute<{ seeded: number }>(sql`
+    WITH ins AS (
+      INSERT INTO events (record_id, did, collection, rkey, action, rev, live)
+      SELECT ${records.id}, ${records.did}, ${records.collection}, ${records.rkey},
+             CASE WHEN ${records.deletedAt} IS NULL THEN 'create' ELSE 'delete' END,
+             ${records.rev}, false
+      FROM ${records}
+      WHERE ${where}
+      ORDER BY ${records.id}
+      RETURNING 1
+    )
+    SELECT count(*)::int AS seeded FROM ins
+  `)
+  return { data: { seeded: rows[0]?.seeded ?? 0 } }
 }
