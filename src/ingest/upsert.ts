@@ -1,8 +1,9 @@
 import { and, eq } from 'drizzle-orm'
 import type { ReservoirConfig } from '../config'
 import type { Db } from '../db/client'
-import { recordLinks, records } from '../db/schema'
+import { recordLinks, recordTypes, records } from '../db/schema'
 import { extractLinks } from './links'
+import { extractTypes } from './types'
 
 /** A record event as delivered by Tap/Tab. Parsed tolerantly — see normalizeEvent. */
 export interface RecordEvent {
@@ -104,6 +105,7 @@ async function applyWrite(
   }
 
   await replaceLinks(tx, recordId, event.record)
+  await replaceTypes(tx, recordId, event.record)
   return 'applied'
 }
 
@@ -114,4 +116,13 @@ async function replaceLinks(tx: Tx, recordId: number, record: Record<string, unk
   if (links.length === 0) return
 
   await tx.insert(recordLinks).values(links.map((link) => ({ recordId, ...link })))
+}
+
+async function replaceTypes(tx: Tx, recordId: number, record: Record<string, unknown> | null): Promise<void> {
+  await tx.delete(recordTypes).where(eq(recordTypes.recordId, recordId))
+
+  const types = extractTypes(record ?? {})
+  if (types.length === 0) return
+
+  await tx.insert(recordTypes).values(types.map((type) => ({ recordId, ...type })))
 }

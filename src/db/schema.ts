@@ -82,6 +82,31 @@ export const recordLinks = pgTable(
   ],
 )
 
+export const recordTypes = pgTable(
+  'record_types',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    recordId: bigint('record_id', { mode: 'number' })
+      .notNull()
+      .references(() => records.id, { onDelete: 'cascade' }),
+    path: varchar('path', { length: 500 }).notNull(),
+    nsid: varchar('nsid', { length: 255 }).notNull(),
+  },
+  (table) => [
+    uniqueIndex('record_types_record_path_nsid_key').on(table.recordId, table.path, table.nsid),
+    index('record_types_nsid_idx').on(table.nsid),
+    index('record_types_path_nsid_idx').on(table.path, table.nsid),
+  ],
+)
+
+export const lexiconSchemas = pgTable('lexicon_schemas', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  nsid: varchar('nsid', { length: 255 }).notNull().unique(),
+  schema: jsonb('schema'),
+  error: text('error'),
+  resolvedAt: timestamp('resolved_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
 export const constellationCache = pgTable('constellation_cache', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
   cacheKey: varchar('cache_key', { length: 64 }).notNull().unique(),

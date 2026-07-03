@@ -3,19 +3,22 @@ import type { ReservoirConfig } from '../config'
 import { ConstellationClient } from '../constellation/client'
 import type { Db } from '../db/client'
 import type { OllamaClient } from '../embed/ollama'
+import { LexiconRegistry } from '../lexicon/registry'
 import { bearerAuth } from './auth'
 import { linksRoutes } from './routes/links'
 import { recordsRoutes } from './routes/records'
 import { searchRoutes } from './routes/search'
+import { typesRoutes } from './routes/types'
 
 export interface ApiDeps {
   db: Db
   config: ReservoirConfig
   ollama: OllamaClient
   constellation?: ConstellationClient
+  lexicons?: LexiconRegistry
 }
 
-export function createApp({ db, config, ollama, constellation }: ApiDeps): Hono {
+export function createApp({ db, config, ollama, constellation, lexicons }: ApiDeps): Hono {
   const app = new Hono()
 
   app.get('/health', (c) => c.json({ ok: true }))
@@ -26,6 +29,7 @@ export function createApp({ db, config, ollama, constellation }: ApiDeps): Hono 
   v1.route('/records', linksRoutes(db, constellation ?? new ConstellationClient(db, config.constellation)))
   v1.route('/records', recordsRoutes(db))
   v1.route('/search', searchRoutes(db, ollama))
+  v1.route('/types', typesRoutes(db, lexicons ?? new LexiconRegistry(db)))
 
   app.route('/api/v1', v1)
   return app
