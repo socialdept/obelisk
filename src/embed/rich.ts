@@ -20,17 +20,25 @@ export const NON_PROSE_KEYS = new Set([
 export async function extractRichText(
   record: Record<string, unknown>,
   resolveTextKeys: TextKeysResolver = async () => null,
+  richContentFields: string[] = ['content'],
 ): Promise<string> {
-  const content = record.content
-  if (content === null || typeof content !== 'object') return ''
+  const sections: string[] = []
 
-  const contentType = (content as { $type?: unknown }).$type
-  const derived = typeof contentType === 'string' ? await resolveTextKeys(contentType).catch(() => null) : null
-  const keys = derived && derived.size > 0 ? derived : DEFAULT_TEXT_KEYS
+  for (const field of richContentFields) {
+    const content = record[field]
+    if (content === null || typeof content !== 'object') continue
 
-  const parts: string[] = []
-  walk(content, keys, parts)
-  return parts.join('\n\n').trim()
+    const contentType = (content as { $type?: unknown }).$type
+    const derived = typeof contentType === 'string' ? await resolveTextKeys(contentType).catch(() => null) : null
+    const keys = derived && derived.size > 0 ? derived : DEFAULT_TEXT_KEYS
+
+    const parts: string[] = []
+    walk(content, keys, parts)
+    const text = parts.join('\n\n').trim()
+    if (text !== '') sections.push(text)
+  }
+
+  return sections.join('\n\n')
 }
 
 function walk(value: unknown, keys: Set<string>, parts: string[]): void {

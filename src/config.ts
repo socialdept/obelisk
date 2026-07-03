@@ -1,6 +1,12 @@
 export interface CollectionConfig {
   /** Record fields to extract for FTS weighting and embeddings. Omit for non-content collections. */
   textFields?: string[]
+  /**
+   * Record fields holding rich/nested content objects (block trees, typed
+   * unions). Their prose is extracted via lexicon-derived text keys.
+   * Defaults to ['content'] for collections that declare textFields.
+   */
+  richContentFields?: string[]
 }
 
 export interface ReservoirConfig {

@@ -96,8 +96,13 @@ export class EmbedWorker {
     }
 
     const recordJson = row.record as Record<string, unknown>
+    const collectionConfig = this.config.collections[row.collection]
     const flat = extractText(this.config, row.collection, recordJson)
-    const rich = await extractRichText(recordJson, this.textKeys)
+    const rich = await extractRichText(
+      recordJson,
+      this.textKeys,
+      collectionConfig?.richContentFields ?? (collectionConfig?.textFields ? ['content'] : []),
+    )
     const text = [flat, rich].filter((part) => part !== '').join('\n\n')
 
     if (text === '') {
