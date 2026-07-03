@@ -45,7 +45,7 @@ async function createSub(overrides: Record<string, unknown> = {}): Promise<numbe
     .insert(webhookSubscriptions)
     .values({
       name: `sub-${Math.random().toString(36).slice(2)}`,
-      url: 'http://laravel.test/hooks/reservoir',
+      url: 'http://laravel.test/hooks/obelisk',
       secret: 'shh',
       cursor: 0,
       maxWaitMs: 0,

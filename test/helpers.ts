@@ -4,9 +4,9 @@ import { migrate } from '../src/db/migrate'
 import type { ObeliskConfig } from '../src/config'
 import type { RecordEvent } from '../src/ingest/upsert'
 
-const ADMIN_URL = process.env.TEST_ADMIN_DATABASE_URL ?? 'postgres://reservoir:reservoir@localhost:5432/reservoir'
+const ADMIN_URL = process.env.TEST_ADMIN_DATABASE_URL ?? 'postgres://obelisk:obelisk@localhost:5432/obelisk'
 export const TEST_DATABASE_URL =
-  process.env.TEST_DATABASE_URL ?? 'postgres://reservoir:reservoir@localhost:5432/reservoir_test'
+  process.env.TEST_DATABASE_URL ?? 'postgres://obelisk:obelisk@localhost:5432/obelisk_test'
 
 export async function setupTestDb(): Promise<{ db: Db; teardown: () => Promise<void> }> {
   const admin = postgres(ADMIN_URL, { max: 1, onnotice: () => {} })

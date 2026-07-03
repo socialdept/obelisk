@@ -159,7 +159,7 @@ Use `getTypes` to discover which `$type` values exist before filtering.
 ```bash
 curl -X POST … "localhost:3000/xrpc/social.dept.obelisk.createWebhook" -d '{
   "name": "my-laravel-app",
-  "url": "http://laravel.test/hooks/reservoir",
+  "url": "http://laravel.test/hooks/obelisk",
   "collections": ["site.standard.document"],
   "record_matchers": { "content.$type": "app.offprint.content" },
   "max_events": 200, "max_wait_ms": 5000,

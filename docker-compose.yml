@@ -4,13 +4,13 @@ services:
     ports:
       - "5432:5432"
     environment:
-      POSTGRES_DB: reservoir
-      POSTGRES_USER: reservoir
-      POSTGRES_PASSWORD: reservoir
+      POSTGRES_DB: obelisk
+      POSTGRES_USER: obelisk
+      POSTGRES_PASSWORD: obelisk
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U reservoir"]
+      test: ["CMD-SHELL", "pg_isready -U obelisk"]
       interval: 5s
       timeout: 3s
       retries: 10
