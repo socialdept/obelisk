@@ -72,9 +72,9 @@ export class WebhookWorker {
     const lastCursor = batch.at(-1)!.cursor
     const body = JSON.stringify({ subscription: sub.name, cursor: lastCursor, events: batch })
 
-    const ok = await this.post(sub, body, lastCursor)
-    if (!ok) {
-      await this.recordFailure(sub)
+    const result = await this.post(sub, body, lastCursor)
+    if (!result.ok) {
+      await this.recordFailure(sub, `${result.detail} (${batch.length} events, ${body.length} bytes)`)
       return false
     }
 
@@ -118,7 +118,11 @@ export class WebhookWorker {
     }))
   }
 
-  private async post(sub: WebhookSubscription, body: string, cursor: string): Promise<boolean> {
+  private async post(
+    sub: WebhookSubscription,
+    body: string,
+    cursor: string,
+  ): Promise<{ ok: boolean; detail: string }> {
     try {
       const response = await this.fetchFn(sub.url, {
         method: 'POST',
@@ -130,18 +134,18 @@ export class WebhookWorker {
         },
         body,
       })
-      return response.ok
-    } catch {
-      return false
+      return { ok: response.ok, detail: `HTTP ${response.status}` }
+    } catch (err) {
+      return { ok: false, detail: err instanceof Error ? err.message : String(err) }
     }
   }
 
-  private async recordFailure(sub: WebhookSubscription): Promise<void> {
+  private async recordFailure(sub: WebhookSubscription, detail: string): Promise<void> {
     const failureCount = sub.failureCount + 1
     const backoff = Math.min(1000 * 2 ** failureCount, MAX_BACKOFF_MS)
     const status = failureCount >= FAILING_THRESHOLD ? 'failing' : sub.status
 
-    console.error(`webhook worker: delivery to "${sub.name}" failed (${failureCount}), retry in ${backoff}ms`)
+    console.error(`webhook worker: delivery to "${sub.name}" failed (${failureCount}): ${detail}, retry in ${backoff}ms`)
     await this.db
       .update(webhookSubscriptions)
       .set({ failureCount, status, nextAttemptAt: new Date(Date.now() + backoff) })
