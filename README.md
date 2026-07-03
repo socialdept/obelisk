@@ -64,9 +64,11 @@ Useful flags: `include_deleted=1` (see soft-deleted records), `cursor` (paginati
 
 ## API
 
-### XRPC (atproto-shaped, primary)
+Obelisk speaks two atproto-shaped XRPC **planes**, split by one invariant: *in the collection plane, `{collection}` is always the collection of the records being returned/counted/searched.* Anything that spans collections or is about the archive itself lives in the service plane. (Full rule in [SCOPE.md](./SCOPE.md#api-planes).)
 
-Every archived collection gets read-only XRPC methods — the method NSID is the collection itself:
+### Collection plane — `/xrpc/{collection}.{verb}`
+
+The method NSID *is* the archived collection you're querying:
 
 ```bash
 # list with filters + sorting (slices-style where DSL: eq / contains / in)
@@ -83,20 +85,32 @@ curl -X POST "localhost:3000/xrpc/site.standard.document.searchRecords" -d '{"q"
 
 `where` supports record fields (dot paths like `content.$type`), system fields (`did`, `collection`, `rkey`, `uri`, `cid`, `indexedAt`), and the special `json` field (whole-record search). Responses use atproto conventions (`{uri, cid, did, collection, value, indexedAt}`, `{error, message}` errors). Write verbs return `MethodNotImplemented` — Obelisk is a read-only archive.
 
-### REST (service endpoints)
+### Service plane — `/xrpc/social.dept.obelisk.{verb}`
+
+Obelisk's own cross-collection / archive operations, under the owned authority `social.dept.obelisk` (domain `dept.social`). All are GET queries with atproto `{error, message}` error bodies:
+
+| Method | What it does |
+|---|---|
+| `getEvents` | Cursor-paged change log — filters `cursor`, `collection`, `did`, `action`, `audience`, `feed`, `link.*`, `record.*`, `include_record` |
+| `getTypes?collection=&path=` | Inventory of `$type` values observed in the archive, by path, with counts |
+| `getType?nsid=` | Usage + resolved lexicon schema + derived text fields + observed union members |
+| `getLinks?uri=` | Outgoing AT Proto references extracted from a record |
+| `getBacklinks?uri=&collection=&path=` | Records in the archive that reference a target |
+| `getNetworkBacklinks?uri=&collection=&path=&count=` | Network-wide backlinks via Constellation (cached, serve-stale) |
+
+```bash
+curl "localhost:3000/xrpc/social.dept.obelisk.getEvents?cursor=0&collection=site.standard.document"
+curl "localhost:3000/xrpc/social.dept.obelisk.getBacklinks?uri=at://…/site.standard.publication/self"
+```
+
+`getFootprint` (everything for a DID across every collection) is planned alongside DID-scoped archiving (LAB-27/30).
+
+### REST (`/api/v1`) — legacy reads + management
+
+Each service-plane method above has a `/api/v1` REST twin that predates it (`/events`, `/types`, `/records/…/links|backlinks|backlinks/network`); record queries (`/records`, `/search`, `/search/semantic`) have collection-plane equivalents (`{collection}.getRecords` / `.searchRecords`). These REST reads remain until consumers migrate, then get removed. **Management CRUD stays REST** — it's operator admin, not a consumer data API:
 
 | Endpoint | What it does |
 |---|---|
-| `GET /api/v1/records` | List/filter archived records |
-| `GET /api/v1/records/:did/:collection/:rkey` | Fetch one record |
-| `GET /api/v1/search?q=` | Weighted full-text search (title > description > body, including rich-block content) |
-| `GET /api/v1/search/semantic?q=` | Vector search over chunked content (pgvector HNSW) |
-| `GET /api/v1/records/…/links` | Outgoing AT Proto references extracted from the record |
-| `GET /api/v1/records/…/backlinks` | Records in the archive that reference this one |
-| `GET /api/v1/records/…/backlinks/network` | Network-wide backlinks via Constellation (cached, serve-stale) |
-| `GET /api/v1/types` | Inventory of `$type` values observed in the archive, by path, with counts |
-| `GET /api/v1/types/:nsid` | Usage + resolved lexicon schema + derived text fields + observed union members |
-| `GET /api/v1/events` | Cursor-paged change log — poll it to react to new/updated/deleted records |
 | `/api/v1/webhooks` CRUD | Batched push subscriptions over the event log (HMAC-signed) |
 | `/api/v1/audiences` CRUD | Query-defined DID sets; `/:name/members` lists, `/:name/members/:did` checks |
 

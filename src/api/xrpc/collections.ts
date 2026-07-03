@@ -1,8 +1,13 @@
-import { Hono, type Context } from 'hono'
+import { Hono } from 'hono'
 import { and, eq, isNull, sql, type SQL } from 'drizzle-orm'
+import type { ObeliskConfig } from '../../config'
+import type { ConstellationClient } from '../../constellation/client'
 import type { Db } from '../../db/client'
 import type { OllamaClient } from '../../embed/ollama'
+import type { LexiconRegistry } from '../../lexicon/registry'
 import { records } from '../../db/schema'
+import { xrpcError, type XrpcContext } from './respond'
+import { SERVICE_NS, handleServiceMethod } from './service'
 import { sortClause, whereFilters, type WhereClause } from './where'
 
 const NSID_RE = /^[a-z][a-z0-9-]*(\.[a-z0-9-]+)+\.[a-zA-Z][a-zA-Z0-9]*$/
@@ -28,12 +33,31 @@ interface QueryBody {
  *   POST /xrpc/site.standard.document.searchRecords
  *
  * Read-only by design (SCOPE.md): write verbs are not implemented.
+ *
+ * Methods under the reserved authority `social.dept.obelisk.*` are the service
+ * plane (events / types / link graph) and route to ./service.
  */
-export function xrpcRoutes(db: Db, ollama: OllamaClient): Hono {
+export interface XrpcDeps {
+  db: Db
+  ollama: OllamaClient
+  config: ObeliskConfig
+  constellation: ConstellationClient
+  lexicons: LexiconRegistry
+}
+
+export function xrpcRoutes(deps: XrpcDeps): Hono {
+  const { db, ollama } = deps
   const app = new Hono()
 
   app.all('/:method', async (c) => {
     const method = c.req.param('method')
+
+    // Service plane: Obelisk's own cross-collection / archive methods.
+    if (method === SERVICE_NS || method.startsWith(`${SERVICE_NS}.`)) {
+      return handleServiceMethod(method.slice(SERVICE_NS.length + 1), c, deps)
+    }
+
+    // Collection plane: {collection}.{verb}, collection = the queried NSID.
     const lastDot = method.lastIndexOf('.')
     const collection = method.slice(0, lastDot)
     const verb = method.slice(lastDot + 1)
@@ -54,7 +78,7 @@ export function xrpcRoutes(db: Db, ollama: OllamaClient): Hono {
       case 'createRecord':
       case 'updateRecord':
       case 'deleteRecord':
-        return xrpcError(c, 501, 'MethodNotImplemented', 'obelisk is a read-only archive — writes go through your PDS')
+        return xrpcError(c, 501, 'MethodNotImplemented', 'obelisk is a read-only archive, writes go through your PDS')
       default:
         return xrpcError(c, 501, 'MethodNotImplemented', `unknown method suffix: ${verb}`)
     }
@@ -210,8 +234,3 @@ function decodeCursor(cursor: string | undefined): number | null {
   return Number.isInteger(offset) && offset >= 0 ? offset : null
 }
 
-type XrpcContext = Context
-
-function xrpcError(c: XrpcContext, status: 400 | 404 | 501, error: string, message: string) {
-  return c.json({ error, message }, status)
-}

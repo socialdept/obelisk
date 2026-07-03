@@ -6,59 +6,72 @@ import type { LexiconRegistry } from '../../lexicon/registry'
 
 const MAX_MEMBERS = 10
 
+/** Inventory of $type values observed in the archive, keyed by path → nsid → count. */
+export async function getTypeInventory(
+  db: Db,
+  opts: { collection?: string; path?: string } = {},
+): Promise<Record<string, Record<string, number>>> {
+  const { collection, path } = opts
+  const rows = await db.execute<{ path: string; nsid: string; count: string }>(sql`
+    SELECT rt.path, rt.nsid, count(*) AS count
+    FROM record_types rt
+    JOIN records r ON r.id = rt.record_id
+    WHERE r.deleted_at IS NULL
+      ${collection ? sql`AND r.collection = ${collection}` : sql``}
+      ${path ? sql`AND rt.path = ${path}` : sql``}
+    GROUP BY rt.path, rt.nsid
+    ORDER BY rt.path, count(*) DESC
+  `)
+
+  const types: Record<string, Record<string, number>> = {}
+  for (const row of rows) {
+    types[row.path] ??= {}
+    types[row.path]![row.nsid] = Number(row.count)
+  }
+  return types
+}
+
+/** Usage + resolved lexicon + derived text fields + observed union members for one nsid. */
+export async function getTypeDetail(db: Db, registry: LexiconRegistry, nsid: string) {
+  const resolveExternal: ExternalResolver = async (ref) => (await registry.get(ref)).schema
+
+  const usage = await db.execute<{ path: string; collection: string; count: string }>(sql`
+    SELECT rt.path, r.collection, count(*) AS count
+    FROM record_types rt
+    JOIN records r ON r.id = rt.record_id
+    WHERE rt.nsid = ${nsid} AND r.deleted_at IS NULL
+    GROUP BY rt.path, r.collection
+    ORDER BY count(*) DESC
+  `)
+
+  const entry = await registry.get(nsid)
+  const textFields = entry.schema ? await deriveTextFields(entry.schema, resolveExternal) : null
+  const members = await observedMembers(db, nsid, resolveExternal)
+
+  return {
+    nsid,
+    usage: usage.map((row) => ({ path: row.path, collection: row.collection, count: Number(row.count) })),
+    lexicon: entry.schema,
+    lexiconError: entry.error,
+    resolvedAt: entry.resolvedAt,
+    textFields,
+    members,
+  }
+}
+
 export function typesRoutes(db: Db, registry: LexiconRegistry): Hono {
   const app = new Hono()
 
   app.get('/', async (c) => {
-    const collection = c.req.query('collection')
-    const path = c.req.query('path')
-
-    const rows = await db.execute<{ path: string; nsid: string; count: string }>(sql`
-      SELECT rt.path, rt.nsid, count(*) AS count
-      FROM record_types rt
-      JOIN records r ON r.id = rt.record_id
-      WHERE r.deleted_at IS NULL
-        ${collection ? sql`AND r.collection = ${collection}` : sql``}
-        ${path ? sql`AND rt.path = ${path}` : sql``}
-      GROUP BY rt.path, rt.nsid
-      ORDER BY rt.path, count(*) DESC
-    `)
-
-    const types: Record<string, Record<string, number>> = {}
-    for (const row of rows) {
-      types[row.path] ??= {}
-      types[row.path]![row.nsid] = Number(row.count)
-    }
-
+    const types = await getTypeInventory(db, {
+      collection: c.req.query('collection'),
+      path: c.req.query('path'),
+    })
     return c.json({ types })
   })
 
   app.get('/:nsid', async (c) => {
-    const nsid = c.req.param('nsid')
-    const resolveExternal: ExternalResolver = async (ref) => (await registry.get(ref)).schema
-
-    const usage = await db.execute<{ path: string; collection: string; count: string }>(sql`
-      SELECT rt.path, r.collection, count(*) AS count
-      FROM record_types rt
-      JOIN records r ON r.id = rt.record_id
-      WHERE rt.nsid = ${nsid} AND r.deleted_at IS NULL
-      GROUP BY rt.path, r.collection
-      ORDER BY count(*) DESC
-    `)
-
-    const entry = await registry.get(nsid)
-    const textFields = entry.schema ? await deriveTextFields(entry.schema, resolveExternal) : null
-    const members = await observedMembers(db, nsid, resolveExternal)
-
-    return c.json({
-      nsid,
-      usage: usage.map((row) => ({ path: row.path, collection: row.collection, count: Number(row.count) })),
-      lexicon: entry.schema,
-      lexiconError: entry.error,
-      resolvedAt: entry.resolvedAt,
-      textFields,
-      members,
-    })
+    return c.json(await getTypeDetail(db, registry, c.req.param('nsid')))
   })
 
   return app

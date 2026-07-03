@@ -29,6 +29,30 @@ AppView" — minus the write path, plus search/vectors/webhooks/link-graph.
    that require additional always-on infrastructure need an exceptional
    justification.
 
+## API planes
+
+Two request planes, split by one invariant:
+
+> In the **collection plane**, `{collection}` is always the collection of the
+> records being *returned / counted / searched*.
+
+1. **Collection plane** — `/xrpc/{collection}.{verb}`, where `{collection}` is
+   the archived collection being queried (it borrows that lexicon's own NSID,
+   owned by whoever authored it). Verbs: `getRecords`, `getRecord`,
+   `countRecords`, `searchRecords`. Read-only; write verbs return
+   `MethodNotImplemented`.
+2. **Service plane** — `/xrpc/social.dept.obelisk.{verb}` for Obelisk's own
+   operations that span collections or concern the archive itself (authority =
+   owned domain `dept.social`). Verbs: `getEvents`, `getTypes`, `getType`,
+   `getLinks`, `getBacklinks`, `getNetworkBacklinks` (and later `getFootprint`).
+   Keyed by `uri`/params, not by a collection in the method name.
+
+Anything that breaks the invariant (spans collections, or is about the archive)
+lives in the service plane — never jammed into `{collection}.{verb}`. Management
+CRUD (webhooks/audiences) stays REST: it's operator admin, not a consumer data
+API. Legacy `/api/v1` read endpoints remain until consumers migrate, then get
+removed.
+
 ## In scope — shipped
 
 - Sync (Tab, ack-batched, idempotent, soft deletes) and the permanent archive
