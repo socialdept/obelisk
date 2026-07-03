@@ -4,17 +4,22 @@ import type { ReservoirConfig } from '../config'
 import type { Db } from '../db/client'
 import { recordEmbeddings, records } from '../db/schema'
 import { chunkText } from './chunk'
-import { extractText } from './extract'
+import { extractFields } from './extract'
 import { extractRichText, type TextKeysResolver } from './rich'
+import type { CollectionExtraction } from '../lexicon/collection'
 import type { OllamaClient } from './ollama'
 
 const MAX_ATTEMPTS = 3
+
+export type ExtractionResolver = (collection: string) => Promise<CollectionExtraction>
 
 export interface EmbedWorkerOptions {
   claimSize?: number
   idleMs?: number
   /** Lexicon-driven text keys for rich content; falls back to defaults when absent. */
   textKeys?: TextKeysResolver
+  /** Where each collection's prose lives (lexicon-derived + config overrides). */
+  extraction?: ExtractionResolver
 }
 
 /**
@@ -26,6 +31,7 @@ export class EmbedWorker {
   private readonly claimSize: number
   private readonly idleMs: number
   private readonly textKeys: TextKeysResolver
+  private readonly extraction: ExtractionResolver
   private stopped = false
   private loopPromise: Promise<void> | null = null
 
@@ -38,6 +44,16 @@ export class EmbedWorker {
     this.claimSize = options.claimSize ?? 10
     this.idleMs = options.idleMs ?? 2000
     this.textKeys = options.textKeys ?? (async () => null)
+    // Config-only fallback keeps the worker usable without a lexicon registry (tests).
+    this.extraction =
+      options.extraction ??
+      (async (collection) => ({
+        titleFields: this.config.collections[collection]?.titleFields ?? [],
+        textFields: this.config.collections[collection]?.textFields ?? [],
+        richContentFields:
+          this.config.collections[collection]?.richContentFields ??
+          (this.config.collections[collection]?.textFields ? ['content'] : []),
+      }))
   }
 
   start(): void {
@@ -96,14 +112,13 @@ export class EmbedWorker {
     }
 
     const recordJson = row.record as Record<string, unknown>
-    const collectionConfig = this.config.collections[row.collection]
-    const flat = extractText(this.config, row.collection, recordJson)
-    const rich = await extractRichText(
-      recordJson,
-      this.textKeys,
-      collectionConfig?.richContentFields ?? (collectionConfig?.textFields ? ['content'] : []),
-    )
-    const text = [flat, rich].filter((part) => part !== '').join('\n\n')
+    const extraction = await this.extraction(row.collection)
+
+    const title = extractFields(recordJson, extraction.titleFields)
+    const flat = extractFields(recordJson, extraction.textFields)
+    const rich = await extractRichText(recordJson, this.textKeys, extraction.richContentFields)
+    const body = [flat, rich].filter((part) => part !== '').join('\n\n')
+    const text = [title, body].filter((part) => part !== '').join('\n\n')
 
     if (text === '') {
       await this.setStatus(recordId, 'skipped')
@@ -127,7 +142,11 @@ export class EmbedWorker {
         )
         await tx
           .update(records)
-          .set({ embedStatus: 'done', extractedText: rich === '' ? null : rich })
+          .set({
+            embedStatus: 'done',
+            extractedTitle: title === '' ? null : title,
+            extractedText: body === '' ? null : body,
+          })
           .where(eq(records.id, recordId))
       })
     } catch (err) {

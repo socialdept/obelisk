@@ -87,15 +87,16 @@ async function applyWrite(
   existing: { id: number; cid: string | null } | undefined,
 ): Promise<UpsertResult> {
   const contentChanged = !existing || existing.cid !== event.cid
-  const embeddable = (config.collections[event.collection]?.textFields?.length ?? 0) > 0
 
+  // Every changed record goes through the extraction worker — whether it has
+  // prose is decided there from the collection's lexicon, not config.
   const row = {
     cid: event.cid,
     rev: event.rev,
     record: event.record ?? {},
     deletedAt: null,
     indexedAt: new Date(),
-    ...(contentChanged && { embedStatus: embeddable ? 'pending' : 'skipped', embedAttempts: 0 }),
+    ...(contentChanged && { embedStatus: 'pending', embedAttempts: 0 }),
   }
 
   let recordId: number

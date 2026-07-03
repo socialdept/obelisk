@@ -1,34 +1,24 @@
 import { describe, expect, test } from 'bun:test'
 import { chunkText } from '../src/embed/chunk'
-import { extractText } from '../src/embed/extract'
-import { testConfig } from './helpers'
+import { extractFields } from '../src/embed/extract'
 
-describe('extractText', () => {
-  test('joins configured fields in order with blank lines', () => {
-    const text = extractText(testConfig, 'site.standard.document', {
-      title: 'My Title',
-      description: 'A description.',
-      textContent: 'Body text.',
-    })
+describe('extractFields', () => {
+  test('joins named fields in order with blank lines', () => {
+    const text = extractFields(
+      { title: 'My Title', description: 'A description.', textContent: 'Body text.' },
+      ['title', 'description', 'textContent'],
+    )
 
     expect(text).toBe('My Title\n\nA description.\n\nBody text.')
   })
 
   test('skips missing and non-string fields', () => {
-    const text = extractText(testConfig, 'site.standard.document', {
-      title: 'Only Title',
-      description: 42,
-    })
-
+    const text = extractFields({ title: 'Only Title', description: 42 }, ['title', 'description'])
     expect(text).toBe('Only Title')
   })
 
-  test('returns empty string for non-content collections', () => {
-    const text = extractText(testConfig, 'site.standard.graph.subscription', {
-      publication: 'at://did:plc:x/site.standard.publication/1',
-    })
-
-    expect(text).toBe('')
+  test('returns empty string when no fields given', () => {
+    expect(extractFields({ publication: 'at://x/y/1' }, [])).toBe('')
   })
 })
 

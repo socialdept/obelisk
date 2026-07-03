@@ -5,6 +5,7 @@ import { migrate } from './db/migrate'
 import { OllamaClient } from './embed/ollama'
 import { EmbedWorker } from './embed/worker'
 import { Ingester } from './ingest/ingester'
+import { createExtractionResolver } from './lexicon/collection'
 import { LexiconRegistry } from './lexicon/registry'
 import { createTextKeysResolver } from './lexicon/textkeys'
 import { WebhookWorker } from './webhooks/worker'
@@ -18,7 +19,10 @@ const { db, client } = createDb(env.databaseUrl)
 const ollama = new OllamaClient(env.ollamaUrl, config.ollama.model)
 const lexicons = new LexiconRegistry(db)
 const ingester = new Ingester(db, config)
-const embedWorker = new EmbedWorker(db, config, ollama, { textKeys: createTextKeysResolver(lexicons) })
+const embedWorker = new EmbedWorker(db, config, ollama, {
+  textKeys: createTextKeysResolver(lexicons),
+  extraction: createExtractionResolver(lexicons, config.collections),
+})
 const webhookWorker = new WebhookWorker(db, config)
 
 const shutdown = async () => {

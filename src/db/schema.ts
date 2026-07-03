@@ -37,6 +37,7 @@ export const records = pgTable(
     ),
     embedStatus: varchar('embed_status', { length: 20 }).notNull().default('skipped'),
     embedAttempts: integer('embed_attempts').notNull().default(0),
+    extractedTitle: text('extracted_title'),
     extractedText: text('extracted_text'),
     indexedAt: timestamp('indexed_at', { withTimezone: true }).notNull().defaultNow(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),

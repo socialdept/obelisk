@@ -1,13 +1,13 @@
 import type { ReservoirConfig } from './src/config'
 
 export default {
+  // Field locations (title/prose/rich content) are derived from each
+  // collection's published lexicon. Add per-collection overrides
+  // (titleFields/textFields/richContentFields) only when a lexicon is
+  // unpublished or wrong.
   collections: {
-    'site.standard.document': {
-      textFields: ['title', 'description', 'textContent'],
-    },
-    'site.standard.publication': {
-      textFields: ['name', 'description'],
-    },
+    'site.standard.document': {},
+    'site.standard.publication': {},
     'site.standard.graph.subscription': {},
     'site.standard.graph.recommend': {},
   },

@@ -1,11 +1,13 @@
+/**
+ * Per-collection overrides. Everything here is OPTIONAL — when omitted, field
+ * locations are derived from the collection's own published lexicon.
+ */
 export interface CollectionConfig {
-  /** Record fields to extract for FTS weighting and embeddings. Omit for non-content collections. */
+  /** Heading-like fields (FTS weight A). */
+  titleFields?: string[]
+  /** Flat prose fields (FTS weight C + embeddings). */
   textFields?: string[]
-  /**
-   * Record fields holding rich/nested content objects (block trees, typed
-   * unions). Their prose is extracted via lexicon-derived text keys.
-   * Defaults to ['content'] for collections that declare textFields.
-   */
+  /** Fields holding rich/nested content (block trees, typed unions); prose extracted via lexicon-derived text keys. */
   richContentFields?: string[]
 }
 

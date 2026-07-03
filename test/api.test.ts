@@ -5,6 +5,7 @@ import { hashToken } from '../src/api/auth'
 import type { Db } from '../src/db/client'
 import { apiTokens, recordEmbeddings, records } from '../src/db/schema'
 import type { OllamaClient } from '../src/embed/ollama'
+import { eq } from 'drizzle-orm'
 import { applyEvent } from '../src/ingest/upsert'
 import { makeEvent, setupTestDb, testConfig, truncateAll } from './helpers'
 
@@ -115,6 +116,13 @@ describe('GET /api/v1/records', () => {
   })
 })
 
+async function seedExtracted(rkey: string, title: string, body: string): Promise<void> {
+  await db
+    .update(records)
+    .set({ extractedTitle: title, extractedText: body })
+    .where(eq(records.rkey, rkey))
+}
+
 describe('GET /api/v1/search', () => {
   test('finds documents by keyword, respects collection filter', async () => {
     await applyEvent(
@@ -127,6 +135,8 @@ describe('GET /api/v1/search', () => {
       testConfig,
       makeEvent({ rkey: 'k2', record: { title: 'Cooking pasta', textContent: 'Boil water, add salt.' } }),
     )
+    await seedExtracted('k1', 'Weaving the atmosphere', 'All about atproto sync.')
+    await seedExtracted('k2', 'Cooking pasta', 'Boil water, add salt.')
 
     const res = await app.request('/api/v1/search?q=atproto', { headers: AUTH })
     const body = (await res.json()) as { results: { rkey: string }[] }
@@ -193,6 +203,8 @@ describe('record.<path> JSON filters', () => {
       testConfig,
       makeEvent({ rkey: 'lf-2', record: { title: 'Shared words here', content: { $type: 'pub.leaflet.content' } } }),
     )
+    await seedExtracted('op-2', 'Shared words here', '')
+    await seedExtracted('lf-2', 'Shared words here', '')
 
     const res = await app.request('/api/v1/search?q=shared+words&record.content.$type=app.offprint.content', { headers: AUTH })
     const body = (await res.json()) as { results: { rkey: string }[] }

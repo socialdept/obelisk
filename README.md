@@ -22,7 +22,9 @@ A previous attempt using Tap's webhook delivery flooded the receiving app during
 
 ## Design principle
 
-**Generalized to any lexicon, always.** Behavior is derived from published lexicon schemas wherever possible (the registry resolves any NSID from the network); where derivation can't work, there's a config extension point anyone can fill (`reservoir.config.ts` — collections, text fields, rich content fields, following semantics). Features that would require hardcoding a specific lexicon don't ship. Standard.site collections are the *default config*, not assumptions in code.
+**Generalized to any lexicon, always.** Behavior is derived from published lexicon schemas wherever possible (the registry resolves any NSID from the network); where derivation can't work, there's a config extension point anyone can fill (`reservoir.config.ts` — collections, field overrides, following semantics). Features that would require hardcoding a specific lexicon don't ship. Standard.site collections are the *default config*, not assumptions in code.
+
+In practice: the collections config is just a list of NSIDs. Title fields, prose fields, and rich-content locations are read from each collection's own lexicon (`titleFields`/`textFields`/`richContentFields` exist as per-collection overrides for unpublished or wrong lexicons). Full-text search runs over worker-materialized `extracted_title` (weight A) + `extracted_text` (weight C) — no record-shape assumptions in SQL. `scripts/extract-all.ts` re-extracts the whole archive after extraction-rule changes (fast, no re-embedding).
 
 ## How
 
