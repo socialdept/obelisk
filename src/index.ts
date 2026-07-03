@@ -1,6 +1,8 @@
 import { loadConfig, loadEnv } from './config'
 import { createDb } from './db/client'
 import { migrate } from './db/migrate'
+import { OllamaClient } from './embed/ollama'
+import { EmbedWorker } from './embed/worker'
 import { Ingester } from './ingest/ingester'
 
 const env = loadEnv()
@@ -10,10 +12,12 @@ await migrate(env.databaseUrl)
 
 const { db, client } = createDb(env.databaseUrl)
 const ingester = new Ingester(db, config)
+const embedWorker = new EmbedWorker(db, config, new OllamaClient(env.ollamaUrl, config.ollama.model))
 
 const shutdown = async () => {
   console.log('shutting down…')
   await ingester.stop()
+  await embedWorker.stop()
   await client.end()
   process.exit(0)
 }
@@ -22,5 +26,6 @@ process.on('SIGINT', shutdown)
 process.on('SIGTERM', shutdown)
 
 ingester.start(env.tabWsUrl)
+embedWorker.start()
 
-console.log('reservoir: ingesting')
+console.log('reservoir: ingesting + embedding')
