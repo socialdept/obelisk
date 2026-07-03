@@ -3,10 +3,12 @@ import type { ObeliskConfig } from '../config'
 import { ConstellationClient } from '../constellation/client'
 import type { Db } from '../db/client'
 import type { OllamaClient } from '../embed/ollama'
+import { TabAdmin } from '../ingest/tab-admin'
 import { LexiconRegistry } from '../lexicon/registry'
 import { audiencesRoutes } from './routes/audiences'
 import { bearerAuth } from './auth'
 import { eventsRoutes } from './routes/events'
+import { footprintRoutes, watchedRoutes } from './routes/watched'
 import { linksRoutes } from './routes/links'
 import { recordsRoutes } from './routes/records'
 import { searchRoutes } from './routes/search'
@@ -20,17 +22,20 @@ export interface ApiDeps {
   ollama: OllamaClient
   constellation?: ConstellationClient
   lexicons?: LexiconRegistry
+  /** Footprint-Tab enrollment client. Defaults to unconfigured (no-op) — see TabAdmin. */
+  tabAdmin?: TabAdmin
   /** Disables API authentication entirely. Local development only. */
   devMode?: boolean
 }
 
-export function createApp({ db, config, ollama, constellation, lexicons, devMode }: ApiDeps): Hono {
+export function createApp({ db, config, ollama, constellation, lexicons, tabAdmin, devMode }: ApiDeps): Hono {
   const app = new Hono()
 
   app.get('/health', (c) => c.json({ ok: true }))
 
   const constellationClient = constellation ?? new ConstellationClient(db, config.constellation)
   const lexiconRegistry = lexicons ?? new LexiconRegistry(db)
+  const tab = tabAdmin ?? new TabAdmin(undefined)
 
   const v1 = new Hono()
   if (devMode) {
@@ -46,6 +51,8 @@ export function createApp({ db, config, ollama, constellation, lexicons, devMode
   v1.route('/events', eventsRoutes(db, config))
   v1.route('/webhooks', webhooksRoutes(db))
   v1.route('/audiences', audiencesRoutes(db))
+  v1.route('/watched-dids', watchedRoutes(db, tab))
+  v1.route('/footprint', footprintRoutes(db))
 
   app.route('/api/v1', v1)
 

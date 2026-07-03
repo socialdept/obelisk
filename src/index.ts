@@ -5,6 +5,7 @@ import { migrate } from './db/migrate'
 import { OllamaClient } from './embed/ollama'
 import { EmbedWorker } from './embed/worker'
 import { Ingester } from './ingest/ingester'
+import { TabAdmin } from './ingest/tab-admin'
 import { createExtractionResolver } from './lexicon/collection'
 import { LexiconRegistry } from './lexicon/registry'
 import { createTextKeysResolver } from './lexicon/textkeys'
@@ -24,6 +25,7 @@ const embedWorker = new EmbedWorker(db, config, ollama, {
   extraction: createExtractionResolver(lexicons, config.collections),
 })
 const webhookWorker = new WebhookWorker(db, config)
+const tabAdmin = new TabAdmin(env.tabFootprintAdminUrl)
 
 const shutdown = async () => {
   console.log('shutting down…')
@@ -49,7 +51,7 @@ ingester.start(env.tabWsUrl)
 embedWorker.start()
 webhookWorker.start()
 
-const app = createApp({ db, config, ollama, lexicons, devMode: env.devMode })
+const app = createApp({ db, config, ollama, lexicons, tabAdmin, devMode: env.devMode })
 const server = Bun.serve({ port: env.port, fetch: app.fetch, idleTimeout: 60 })
 
 console.log(`obelisk: ingesting + embedding, api on :${env.port}`)

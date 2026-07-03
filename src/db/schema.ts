@@ -180,6 +180,24 @@ export const webhookSubscriptions = pgTable('webhook_subscriptions', {
 
 export type WebhookSubscription = typeof webhookSubscriptions.$inferSelect
 
+export const watchedDids = pgTable(
+  'watched_dids',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    did: varchar('did', { length: 255 }).notNull().unique(),
+    note: text('note'),
+    // null = the whole repo (all collections); an array scopes to those NSIDs.
+    collections: jsonb('collections').$type<string[] | null>(),
+    active: boolean('active').notNull().default(true),
+    // null until getRepo backfill completes; bounds "deleted" coverage for this DID.
+    snapshotAt: timestamp('snapshot_at', { withTimezone: true }),
+    addedAt: timestamp('added_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index('watched_dids_active_idx').on(table.active)],
+)
+
+export type WatchedDidRow = typeof watchedDids.$inferSelect
+
 export const apiTokens = pgTable('api_tokens', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
   name: varchar('name', { length: 255 }).notNull(),

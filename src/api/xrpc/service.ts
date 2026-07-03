@@ -5,6 +5,7 @@ import type { LexiconRegistry } from '../../lexicon/registry'
 import { queryEvents } from '../routes/events'
 import { getRecordLinks, queryBacklinks, queryNetworkBacklinks } from '../routes/links'
 import { getTypeDetail, getTypeInventory } from '../routes/types'
+import { queryFootprint } from '../routes/watched'
 import { xrpcError, type XrpcContext } from './respond'
 
 /** Reserved authority for Obelisk's own service-plane methods (domain dept.social). */
@@ -37,6 +38,8 @@ export function handleServiceMethod(verb: string, c: XrpcContext, deps: ServiceD
       return getBacklinks(c, deps)
     case 'getNetworkBacklinks':
       return getNetworkBacklinks(c, deps)
+    case 'getFootprint':
+      return getFootprint(c, deps)
     default:
       return xrpcError(c, 501, 'MethodNotImplemented', `unknown ${SERVICE_NS} method: ${verb || '(none)'}`)
   }
@@ -80,6 +83,19 @@ async function getBacklinks(c: XrpcContext, { db }: ServiceDeps) {
     path: c.req.query('path'),
   })
   return c.json({ uri, backlinks })
+}
+
+async function getFootprint(c: XrpcContext, { db }: ServiceDeps) {
+  const did = c.req.query('did')
+  if (!did) return xrpcError(c, 400, 'InvalidRequest', 'did parameter is required')
+
+  return c.json(
+    await queryFootprint(db, did, {
+      includeDeleted: c.req.query('includeDeleted') === '1',
+      cursor: c.req.query('cursor'),
+      limit: c.req.query('limit') ? Number(c.req.query('limit')) : undefined,
+    }),
+  )
 }
 
 async function getNetworkBacklinks(c: XrpcContext, { constellation }: ServiceDeps) {

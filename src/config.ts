@@ -36,6 +36,8 @@ export interface ObeliskConfig {
 export interface Env {
   databaseUrl: string
   tabWsUrl: string
+  /** HTTP admin API of the footprint Tab (dynamic mode). Unset until LAB-29 lands. */
+  tabFootprintAdminUrl?: string
   ollamaUrl: string
   port: number
   devMode: boolean
@@ -48,6 +50,7 @@ export function loadEnv(): Env {
   return {
     databaseUrl,
     tabWsUrl: process.env.TAB_WS_URL ?? 'ws://localhost:2480',
+    tabFootprintAdminUrl: process.env.TAB_FOOTPRINT_ADMIN_URL,
     ollamaUrl: process.env.OLLAMA_URL ?? 'http://127.0.0.1:11434',
     port: Number(process.env.PORT ?? 3000),
     devMode: process.env.OBELISK_DEV_MODE === 'true',

@@ -58,6 +58,7 @@ curl -H "Authorization: Bearer $TOKEN" "localhost:3000/api/v1/search/semantic?q=
 curl -H "Authorization: Bearer $TOKEN" "localhost:3000/api/v1/records/{did}/{collection}/{rkey}/links"
 curl -H "Authorization: Bearer $TOKEN" "localhost:3000/api/v1/records/{did}/{collection}/{rkey}/backlinks"
 curl -H "Authorization: Bearer $TOKEN" "localhost:3000/api/v1/records/{did}/{collection}/{rkey}/backlinks/network"
+curl -H "Authorization: Bearer $TOKEN" "localhost:3000/api/v1/footprint/{did}?include_deleted=1"
 ```
 
 Useful flags: `include_deleted=1` (see soft-deleted records), `cursor` (pagination), `collection`/`did`/`path` filters on search and backlinks.
@@ -97,13 +98,13 @@ Obelisk's own cross-collection / archive operations, under the owned authority `
 | `getLinks?uri=` | Outgoing AT Proto references extracted from a record |
 | `getBacklinks?uri=&collection=&path=` | Records in the archive that reference a target |
 | `getNetworkBacklinks?uri=&collection=&path=&count=` | Network-wide backlinks via Constellation (cached, serve-stale) |
+| `getFootprint?did=&includeDeleted=&cursor=&limit=` | Everything for a DID across every collection: counts-by-collection (with deleted breakdown) + a unified timeline |
 
 ```bash
 curl "localhost:3000/xrpc/social.dept.obelisk.getEvents?cursor=0&collection=site.standard.document"
 curl "localhost:3000/xrpc/social.dept.obelisk.getBacklinks?uri=at://…/site.standard.publication/self"
+curl "localhost:3000/xrpc/social.dept.obelisk.getFootprint?did=did:plc:…&includeDeleted=1"
 ```
-
-`getFootprint` (everything for a DID across every collection) is planned alongside DID-scoped archiving (LAB-27/30).
 
 ### REST (`/api/v1`) — legacy reads + management
 
@@ -113,6 +114,8 @@ Each service-plane method above has a `/api/v1` REST twin that predates it (`/ev
 |---|---|
 | `/api/v1/webhooks` CRUD | Batched push subscriptions over the event log (HMAC-signed) |
 | `/api/v1/audiences` CRUD | Query-defined DID sets; `/:name/members` lists, `/:name/members/:did` checks |
+| `/api/v1/watched-dids` CRUD | The "who am I auditing" list — DIDs to archive across *all* collections. Add/reactivate enrolls the DID in the footprint Tab (`/repos/add`, backfill + forward capture); remove/deactivate un-enrolls. Best-effort: the table is the source of truth. |
+| `/api/v1/footprint/:did` | Per-DID rollup (any DID) — counts-by-collection + unified timeline, `include_deleted`/`cursor`/`limit`. Twin of service-plane `getFootprint`. `snapshotAt` bounds how far back "deleted" coverage reaches. |
 
 ### Filtering by record content
 
