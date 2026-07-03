@@ -51,19 +51,21 @@ beforeEach(async () => {
 
 describe('links endpoints', () => {
   test('outgoing links for a subscription', async () => {
-    const res = await app.request('/api/v1/records/did:plc:reader/site.standard.graph.subscription/sub-1/links', {
+    const uri = 'at://did:plc:reader/site.standard.graph.subscription/sub-1'
+    const res = await app.request(`/xrpc/social.dept.obelisk.getLinks?uri=${encodeURIComponent(uri)}`, {
       headers: AUTH,
     })
-    const body = (await res.json()) as { links: { targetUri: string; path: string }[] }
+    const body = (await res.json()) as { uri: string; links: { targetUri: string; path: string }[] }
 
     expect(res.status).toBe(200)
+    expect(body.uri).toBe(uri)
     expect(body.links).toHaveLength(1)
     expect(body.links[0]!).toMatchObject({ path: 'publication', targetUri: PUB_URI })
   })
 
   test('internal backlinks: subscription shows up on the publication', async () => {
     const res = await app.request(
-      `/api/v1/records/${PUB_DID}/site.standard.publication/${PUB_RKEY}/backlinks`,
+      `/xrpc/social.dept.obelisk.getBacklinks?uri=${encodeURIComponent(PUB_URI)}`,
       { headers: AUTH },
     )
     const body = (await res.json()) as { backlinks: { path: string; source: { rkey: string } }[] }
@@ -75,7 +77,7 @@ describe('links endpoints', () => {
 
   test('backlinks filterable by source collection', async () => {
     const res = await app.request(
-      `/api/v1/records/${PUB_DID}/site.standard.publication/${PUB_RKEY}/backlinks?collection=site.standard.graph.recommend`,
+      `/xrpc/social.dept.obelisk.getBacklinks?uri=${encodeURIComponent(PUB_URI)}&collection=site.standard.graph.recommend`,
       { headers: AUTH },
     )
     const body = (await res.json()) as { backlinks: unknown[] }
@@ -91,7 +93,7 @@ describe('links endpoints', () => {
     )
 
     const res = await app.request(
-      `/api/v1/records/${PUB_DID}/site.standard.publication/${PUB_RKEY}/backlinks`,
+      `/xrpc/social.dept.obelisk.getBacklinks?uri=${encodeURIComponent(PUB_URI)}`,
       { headers: AUTH },
     )
     const body = (await res.json()) as { backlinks: unknown[] }
@@ -100,7 +102,10 @@ describe('links endpoints', () => {
   })
 
   test('plain record fetch still works alongside links routes', async () => {
-    const res = await app.request(`/api/v1/records/${PUB_DID}/site.standard.publication/${PUB_RKEY}`, { headers: AUTH })
+    const res = await app.request(
+      `/xrpc/site.standard.publication.getRecord?uri=${encodeURIComponent(PUB_URI)}`,
+      { headers: AUTH },
+    )
     expect(res.status).toBe(200)
   })
 })

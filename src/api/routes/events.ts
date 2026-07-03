@@ -1,4 +1,3 @@
-import { Hono } from 'hono'
 import { and, asc, eq, gt, sql, type SQL } from 'drizzle-orm'
 import { audienceFilter, findAudience } from '../../audiences/definition'
 import type { ObeliskConfig } from '../../config'
@@ -15,9 +14,8 @@ export interface EventsResult {
 }
 
 /**
- * Cursor-paged change log query shared by GET /api/v1/events and the
- * social.dept.obelisk.getEvents XRPC method. `query` is the raw query-param
- * record (same param vocabulary on both planes). Returns `{ error }` on a
+ * Cursor-paged change log query behind the social.dept.obelisk.getEvents XRPC
+ * method. `query` is the raw query-param record. Returns `{ error }` on a
  * client mistake (bad cursor / unknown audience / bad feed) — all 400s.
  */
 export async function queryEvents(
@@ -78,18 +76,6 @@ export async function queryEvents(
     })),
     cursor: last ? String(last.event.id) : null,
   }
-}
-
-export function eventsRoutes(db: Db, config: ObeliskConfig): Hono {
-  const app = new Hono()
-
-  app.get('/', async (c) => {
-    const result = await queryEvents(db, config, c.req.query())
-    if ('error' in result) return c.json({ error: result.error }, 400)
-    return c.json(result)
-  })
-
-  return app
 }
 
 function parseEventLimit(raw: string | undefined): number {

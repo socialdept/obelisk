@@ -52,20 +52,23 @@ Mint a token and query:
 
 ```bash
 TOKEN=$(bun run scripts/create-token.ts cli)
-curl -H "Authorization: Bearer $TOKEN" "localhost:3000/api/v1/records?collection=site.standard.document&limit=5"
-curl -H "Authorization: Bearer $TOKEN" "localhost:3000/api/v1/search?q=atproto"
-curl -H "Authorization: Bearer $TOKEN" "localhost:3000/api/v1/search/semantic?q=decentralized+publishing"
-curl -H "Authorization: Bearer $TOKEN" "localhost:3000/api/v1/records/{did}/{collection}/{rkey}/links"
-curl -H "Authorization: Bearer $TOKEN" "localhost:3000/api/v1/records/{did}/{collection}/{rkey}/backlinks"
-curl -H "Authorization: Bearer $TOKEN" "localhost:3000/api/v1/records/{did}/{collection}/{rkey}/backlinks/network"
-curl -H "Authorization: Bearer $TOKEN" "localhost:3000/api/v1/footprint/{did}?include_deleted=1"
+A="Authorization: Bearer $TOKEN"
+curl -X POST -H "$A" "localhost:3000/xrpc/site.standard.document.getRecords" -d '{"limit": 5}'
+curl -X POST -H "$A" "localhost:3000/xrpc/site.standard.document.searchRecords" -d '{"q": "atproto"}'
+curl -X POST -H "$A" "localhost:3000/xrpc/site.standard.document.searchRecords" -d '{"q": "decentralized publishing", "semantic": true}'
+curl -H "$A" "localhost:3000/xrpc/social.dept.obelisk.getLinks?uri=at://{did}/{collection}/{rkey}"
+curl -H "$A" "localhost:3000/xrpc/social.dept.obelisk.getBacklinks?uri=at://{did}/{collection}/{rkey}"
+curl -H "$A" "localhost:3000/xrpc/social.dept.obelisk.getNetworkBacklinks?uri=at://{did}/{collection}/{rkey}"
+curl -H "$A" "localhost:3000/xrpc/social.dept.obelisk.getFootprint?did={did}&includeDeleted=1"
 ```
 
-Useful flags: `include_deleted=1` (see soft-deleted records), `cursor` (pagination), `collection`/`did`/`path` filters on search and backlinks.
+Everything is XRPC — there is no REST plane. Useful flags: `includeDeleted` (see soft-deleted records), `cursor` (pagination), `collection`/`did`/`path` filters on backlinks.
 
 ## API
 
-Obelisk speaks two atproto-shaped XRPC **planes**, split by one invariant: *in the collection plane, `{collection}` is always the collection of the records being returned/counted/searched.* Anything that spans collections or is about the archive itself lives in the service plane. (Full rule in [SCOPE.md](./SCOPE.md#api-planes).)
+Obelisk's entire HTTP surface is atproto-shaped XRPC — **there is no REST plane.** Two planes, split by one invariant: *in the collection plane, `{collection}` is always the collection of the records being returned/counted/searched.* Anything that spans collections or is about the archive itself lives in the service plane. (Full rule in [SCOPE.md](./SCOPE.md#api-planes).)
+
+Following atproto's own `query`/`procedure` split: **queries are GET** (reads), **procedures are POST** (mutations against Obelisk's own Postgres — never a PDS, so hard boundary #2 holds). The collection plane is all queries; the service plane has both.
 
 ### Collection plane — `/xrpc/{collection}.{verb}`
 
@@ -88,7 +91,9 @@ curl -X POST "localhost:3000/xrpc/site.standard.document.searchRecords" -d '{"q"
 
 ### Service plane — `/xrpc/social.dept.obelisk.{verb}`
 
-Obelisk's own cross-collection / archive operations, under the owned authority `social.dept.obelisk` (domain `dept.social`). All are GET queries with atproto `{error, message}` error bodies:
+Obelisk's own cross-collection / archive operations, under the owned authority `social.dept.obelisk` (domain `dept.social`). All error bodies are atproto `{error, message}`.
+
+**Queries (GET):**
 
 | Method | What it does |
 |---|---|
@@ -99,45 +104,52 @@ Obelisk's own cross-collection / archive operations, under the owned authority `
 | `getBacklinks?uri=&collection=&path=` | Records in the archive that reference a target |
 | `getNetworkBacklinks?uri=&collection=&path=&count=` | Network-wide backlinks via Constellation (cached, serve-stale) |
 | `getFootprint?did=&includeDeleted=&cursor=&limit=` | Everything for a DID across every collection: counts-by-collection (with deleted breakdown) + a unified timeline |
+| `getWebhooks` / `getWebhook?id=` | List / fetch push subscriptions |
+| `getAudiences` / `getAudience?name=` | List / fetch query-defined DID sets |
+| `getAudienceMembers?name=&limit=&offset=` / `checkAudienceMember?name=&did=` | Resolve members / test membership |
+| `getWatchedDids?active=` / `getWatchedDid?did=` | List / fetch the "who am I auditing" set |
+
+**Procedures (POST, JSON body — mutate Obelisk's own DB, never a PDS):**
+
+| Method | Body | What it does |
+|---|---|---|
+| `createWebhook` | `{name, url, …}` | Create a batched HMAC-signed subscription; returns the secret **once** |
+| `updateWebhook` / `deleteWebhook` / `testWebhook` | `{id, …}` | Update / remove / send a signed synthetic event |
+| `createAudience` / `updateAudience` | `{name, definition}` | Create / redefine a DID set |
+| `deleteAudience` | `{name}` | Remove |
+| `addWatchedDid` | `{did, note?, collections?}` | Watch a DID across *all* collections; best-effort enrolls it in the footprint Tab (`/repos/add`, backfill + forward capture). The table is the source of truth. |
+| `updateWatchedDid` | `{did, note?, collections?, active?}` | Reactivate re-enrolls; deactivate un-enrolls |
+| `removeWatchedDid` | `{did}` | Un-watch + un-enroll |
 
 ```bash
-curl "localhost:3000/xrpc/social.dept.obelisk.getEvents?cursor=0&collection=site.standard.document"
-curl "localhost:3000/xrpc/social.dept.obelisk.getBacklinks?uri=at://…/site.standard.publication/self"
-curl "localhost:3000/xrpc/social.dept.obelisk.getFootprint?did=did:plc:…&includeDeleted=1"
+curl -H "$A" "localhost:3000/xrpc/social.dept.obelisk.getEvents?cursor=0&collection=site.standard.document"
+curl -H "$A" "localhost:3000/xrpc/social.dept.obelisk.getFootprint?did=did:plc:…&includeDeleted=1"
+curl -X POST -H "$A" "localhost:3000/xrpc/social.dept.obelisk.addWatchedDid" -d '{"did": "did:plc:…"}'
 ```
-
-### REST (`/api/v1`) — legacy reads + management
-
-Each service-plane method above has a `/api/v1` REST twin that predates it (`/events`, `/types`, `/records/…/links|backlinks|backlinks/network`); record queries (`/records`, `/search`, `/search/semantic`) have collection-plane equivalents (`{collection}.getRecords` / `.searchRecords`). These REST reads remain until consumers migrate, then get removed. **Management CRUD stays REST** — it's operator admin, not a consumer data API:
-
-| Endpoint | What it does |
-|---|---|
-| `/api/v1/webhooks` CRUD | Batched push subscriptions over the event log (HMAC-signed) |
-| `/api/v1/audiences` CRUD | Query-defined DID sets; `/:name/members` lists, `/:name/members/:did` checks |
-| `/api/v1/watched-dids` CRUD | The "who am I auditing" list — DIDs to archive across *all* collections. Add/reactivate enrolls the DID in the footprint Tab (`/repos/add`, backfill + forward capture); remove/deactivate un-enrolls. Best-effort: the table is the source of truth. |
-| `/api/v1/footprint/:did` | Per-DID rollup (any DID) — counts-by-collection + unified timeline, `include_deleted`/`cursor`/`limit`. Twin of service-plane `getFootprint`. `snapshotAt` bounds how far back "deleted" coverage reaches. |
 
 ### Filtering by record content
 
-Any endpoint that returns records accepts `record.<path>=<value>` params matching against the record JSON:
+Collection-plane queries filter against record JSON via the `where` DSL (dot paths like `content.$type`):
 
 ```bash
 # all documents whose content block is Offprint's
-curl … "localhost:3000/api/v1/records?record.content.\$type=app.offprint.content"
+curl -X POST -H "$A" "localhost:3000/xrpc/site.standard.document.getRecords" \
+  -d '{"where": {"content.$type": {"eq": "app.offprint.content"}}}'
 # semantic search within that slice
-curl … "localhost:3000/api/v1/search/semantic?q=ai+filmmaking&record.content.\$type=app.offprint.content"
+curl -X POST -H "$A" "localhost:3000/xrpc/site.standard.document.searchRecords" \
+  -d '{"q": "ai filmmaking", "semantic": true, "where": {"content.$type": {"eq": "app.offprint.content"}}}'
 ```
 
-Use `GET /api/v1/types` to discover which `$type` values exist before filtering.
+Use `getTypes` to discover which `$type` values exist before filtering.
 
 ### Consuming changes (Laravel etc.)
 
-**Pull:** `GET /api/v1/events?cursor=<last-seen>&collection=…&include_record=1` returns applied changes in order with a resumable cursor — poll it from a scheduled job, persist the cursor, replay any time by rewinding it. The log only contains *applied* changes (redelivered/stale sync events never appear), so consumers see no duplicates.
+**Pull:** `getEvents?cursor=<last-seen>&collection=…&include_record=1` returns applied changes in order with a resumable cursor — poll it from a scheduled job, persist the cursor, replay any time by rewinding it. The log only contains *applied* changes (redelivered/stale sync events never appear), so consumers see no duplicates.
 
 **Push:** create a webhook subscription and Obelisk delivers the same events as batched, HMAC-signed POSTs — full batch immediately, partial batch at most once per `max_wait_ms`, so your endpoint is never flooded:
 
 ```bash
-curl -X POST … "localhost:3000/api/v1/webhooks" -d '{
+curl -X POST … "localhost:3000/xrpc/social.dept.obelisk.createWebhook" -d '{
   "name": "my-laravel-app",
   "url": "http://laravel.test/hooks/reservoir",
   "collections": ["site.standard.document"],
@@ -147,33 +159,33 @@ curl -X POST … "localhost:3000/api/v1/webhooks" -d '{
 }'   # → returns the signing secret ONCE — store it
 ```
 
-Verify with `hash_equals('sha256='.hash_hmac('sha256', $body, $secret), $sigHeader)`. Delivery is at-least-once with per-subscription cursor: failures back off exponentially and never advance the cursor, `PATCH {"cursor": N}` rewinds for replay, `POST /webhooks/:id/test` sends a synthetic signed event.
+Verify with `hash_equals('sha256='.hash_hmac('sha256', $body, $secret), $sigHeader)`. Delivery is at-least-once with per-subscription cursor: failures back off exponentially and never advance the cursor, `updateWebhook {"id": N, "cursor": M}` rewinds for replay, `testWebhook {"id": N}` sends a synthetic signed event.
 
 ### Audiences
 
-An audience is a **query over the archive**, not a list you maintain — membership updates itself as the network changes (someone deleting their subscription record drops out automatically). Use `audience=<name>` on `GET /events` or in a webhook subscription to scope delivery to member DIDs.
+An audience is a **query over the archive**, not a list you maintain — membership updates itself as the network changes (someone deleting their subscription record drops out automatically). Use `audience=<name>` on `getEvents` or in a webhook subscription to scope delivery to member DIDs.
 
 ```bash
 # everyone subscribed to your publication — zero bookkeeping, ever
-curl -X POST … "localhost:3000/api/v1/audiences" -d '{
+curl -X POST … "localhost:3000/xrpc/social.dept.obelisk.createAudience" -d '{
   "name": "my-subscribers",
   "definition": { "kind": "backlink", "target": "at://did:plc:…/site.standard.publication/self",
                   "collection": "site.standard.graph.subscription", "path": "publication" }
 }'
 ```
 
-Definition kinds: `backlink` (DIDs with records linking to a target), `outlink` (DIDs a user's records link to — e.g. everyone X follows), `collection` (DIDs with records in a collection, optionally matching `record.<path>` values), `static` (explicit DID list, escape hatch). Introspect via `GET /audiences/:name/members` and `GET /audiences/:name/members/:did`.
+Definition kinds: `backlink` (DIDs with records linking to a target), `outlink` (DIDs a user's records link to — e.g. everyone X follows), `collection` (DIDs with records in a collection, optionally matching `record.<path>` values), `static` (explicit DID list, escape hatch). Introspect via `getAudienceMembers?name=` and `checkAudienceMember?name=&did=`.
 
 ### Feeds
 
-Link-based filters on `GET /events` (and webhook subscriptions via the `feed` field):
+Link-based filters on `getEvents` (and webhook subscriptions via the `feed` field):
 
 ```bash
 # personalized following feed: docs from every publication this user subscribes to
-curl … "localhost:3000/api/v1/events?feed=following:did:plc:xyz&collection=site.standard.document"
+curl … "localhost:3000/xrpc/social.dept.obelisk.getEvents?feed=following:did:plc:xyz&collection=site.standard.document"
 
 # records linking to an exact target at a path
-curl … "localhost:3000/api/v1/events?link.site=at://did:plc:…/site.standard.publication/self"
+curl … "localhost:3000/xrpc/social.dept.obelisk.getEvents?link.site=at://did:plc:…/site.standard.publication/self"
 ```
 
 Following semantics (which collection/link path expresses "following") are configurable in `obelisk.config.ts` under `feeds.following` — not hardcoded to Standard.site.

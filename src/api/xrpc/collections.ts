@@ -5,6 +5,8 @@ import type { ConstellationClient } from '../../constellation/client'
 import type { Db } from '../../db/client'
 import type { OllamaClient } from '../../embed/ollama'
 import type { LexiconRegistry } from '../../lexicon/registry'
+import type { TabAdmin } from '../../ingest/tab-admin'
+import type { FetchFn } from '../../webhooks/worker'
 import { records } from '../../db/schema'
 import { xrpcError, type XrpcContext } from './respond'
 import { SERVICE_NS, handleServiceMethod } from './service'
@@ -43,6 +45,9 @@ export interface XrpcDeps {
   config: ObeliskConfig
   constellation: ConstellationClient
   lexicons: LexiconRegistry
+  tab: TabAdmin
+  /** Injectable for testWebhook delivery; defaults to global fetch. */
+  fetchFn?: FetchFn
 }
 
 export function xrpcRoutes(deps: XrpcDeps): Hono {

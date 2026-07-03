@@ -54,19 +54,19 @@ describe('watched-dids management API', () => {
   test('add enrolls in footprint Tab and lists', async () => {
     const app = appWith(capturingTab())
 
-    const res = await app.request('/api/v1/watched-dids', {
+    const res = await app.request('/xrpc/social.dept.obelisk.addWatchedDid', {
       method: 'POST',
       headers: JSON_AUTH,
       body: JSON.stringify({ did: ALICE, note: 'public figure' }),
     })
-    expect(res.status).toBe(201)
+    expect(res.status).toBe(200)
     const { watchedDid } = (await res.json()) as { watchedDid: { did: string; enrolled: boolean; collections: null } }
     expect(watchedDid.did).toBe(ALICE)
     expect(watchedDid.enrolled).toBe(true)
     expect(watchedDid.collections).toBeNull()
     expect(repoCalls).toEqual([{ path: '/repos/add', dids: [ALICE] }])
 
-    const list = await app.request('/api/v1/watched-dids', { headers: AUTH })
+    const list = await app.request('/xrpc/social.dept.obelisk.getWatchedDids', { headers: AUTH })
     const body = (await list.json()) as { watchedDids: { did: string }[] }
     expect(body.watchedDids).toHaveLength(1)
     expect(body.watchedDids[0]!.did).toBe(ALICE)
@@ -75,76 +75,80 @@ describe('watched-dids management API', () => {
   test('add records the DID even when no footprint Tab is configured', async () => {
     const app = appWith(new TabAdmin(undefined))
 
-    const res = await app.request('/api/v1/watched-dids', {
+    const res = await app.request('/xrpc/social.dept.obelisk.addWatchedDid', {
       method: 'POST',
       headers: JSON_AUTH,
       body: JSON.stringify({ did: ALICE }),
     })
-    expect(res.status).toBe(201)
+    expect(res.status).toBe(200)
     const { watchedDid } = (await res.json()) as { watchedDid: { enrolled: boolean } }
     expect(watchedDid.enrolled).toBe(false)
 
     // Still persisted — source of truth for LAB-29 reconcile.
-    const get = await app.request(`/api/v1/watched-dids/${ALICE}`, { headers: AUTH })
+    const get = await app.request(`/xrpc/social.dept.obelisk.getWatchedDid?did=${ALICE}`, { headers: AUTH })
     expect(get.status).toBe(200)
   })
 
   test('missing did rejected; duplicate conflicts', async () => {
     const app = appWith(capturingTab())
-    const bad = await app.request('/api/v1/watched-dids', { method: 'POST', headers: JSON_AUTH, body: '{}' })
+    const bad = await app.request('/xrpc/social.dept.obelisk.addWatchedDid', { method: 'POST', headers: JSON_AUTH, body: '{}' })
     expect(bad.status).toBe(400)
 
     const make = () =>
-      app.request('/api/v1/watched-dids', { method: 'POST', headers: JSON_AUTH, body: JSON.stringify({ did: ALICE }) })
-    expect((await make()).status).toBe(201)
+      app.request('/xrpc/social.dept.obelisk.addWatchedDid', { method: 'POST', headers: JSON_AUTH, body: JSON.stringify({ did: ALICE }) })
+    expect((await make()).status).toBe(200)
     expect((await make()).status).toBe(409)
   })
 
   test('deactivating un-enrolls, reactivating re-enrolls', async () => {
     const app = appWith(capturingTab())
-    await app.request('/api/v1/watched-dids', { method: 'POST', headers: JSON_AUTH, body: JSON.stringify({ did: ALICE }) })
+    await app.request('/xrpc/social.dept.obelisk.addWatchedDid', { method: 'POST', headers: JSON_AUTH, body: JSON.stringify({ did: ALICE }) })
     repoCalls = []
 
-    const off = await app.request(`/api/v1/watched-dids/${ALICE}`, {
-      method: 'PATCH',
+    const off = await app.request('/xrpc/social.dept.obelisk.updateWatchedDid', {
+      method: 'POST',
       headers: JSON_AUTH,
-      body: JSON.stringify({ active: false }),
+      body: JSON.stringify({ did: ALICE, active: false }),
     })
     expect(((await off.json()) as { watchedDid: { active: boolean; enrolled: boolean } }).watchedDid.active).toBe(false)
     expect(repoCalls).toEqual([{ path: '/repos/remove', dids: [ALICE] }])
 
     repoCalls = []
-    await app.request(`/api/v1/watched-dids/${ALICE}`, {
-      method: 'PATCH',
+    await app.request('/xrpc/social.dept.obelisk.updateWatchedDid', {
+      method: 'POST',
       headers: JSON_AUTH,
-      body: JSON.stringify({ active: true }),
+      body: JSON.stringify({ did: ALICE, active: true }),
     })
     expect(repoCalls).toEqual([{ path: '/repos/add', dids: [ALICE] }])
   })
 
   test('patch of note without active change does not touch Tab', async () => {
     const app = appWith(capturingTab())
-    await app.request('/api/v1/watched-dids', { method: 'POST', headers: JSON_AUTH, body: JSON.stringify({ did: ALICE }) })
+    await app.request('/xrpc/social.dept.obelisk.addWatchedDid', { method: 'POST', headers: JSON_AUTH, body: JSON.stringify({ did: ALICE }) })
     repoCalls = []
 
-    await app.request(`/api/v1/watched-dids/${ALICE}`, {
-      method: 'PATCH',
+    await app.request('/xrpc/social.dept.obelisk.updateWatchedDid', {
+      method: 'POST',
       headers: JSON_AUTH,
-      body: JSON.stringify({ note: 'renamed' }),
+      body: JSON.stringify({ did: ALICE, note: 'renamed' }),
     })
     expect(repoCalls).toHaveLength(0)
   })
 
   test('delete removes row and un-enrolls', async () => {
     const app = appWith(capturingTab())
-    await app.request('/api/v1/watched-dids', { method: 'POST', headers: JSON_AUTH, body: JSON.stringify({ did: ALICE }) })
+    await app.request('/xrpc/social.dept.obelisk.addWatchedDid', { method: 'POST', headers: JSON_AUTH, body: JSON.stringify({ did: ALICE }) })
     repoCalls = []
 
-    const res = await app.request(`/api/v1/watched-dids/${ALICE}`, { method: 'DELETE', headers: AUTH })
+    const res = await app.request('/xrpc/social.dept.obelisk.removeWatchedDid', {
+      method: 'POST',
+      headers: JSON_AUTH,
+      body: JSON.stringify({ did: ALICE }),
+    })
     expect(((await res.json()) as { deleted: boolean }).deleted).toBe(true)
     expect(repoCalls).toEqual([{ path: '/repos/remove', dids: [ALICE] }])
 
-    const gone = await app.request(`/api/v1/watched-dids/${ALICE}`, { headers: AUTH })
+    const gone = await app.request(`/xrpc/social.dept.obelisk.getWatchedDid?did=${ALICE}`, { headers: AUTH })
     expect(gone.status).toBe(404)
   })
 })
@@ -162,7 +166,7 @@ describe('per-DID footprint rollup', () => {
     const app = appWith(new TabAdmin(undefined))
     await seedAlice()
 
-    const res = await app.request(`/api/v1/footprint/${ALICE}`, { headers: AUTH })
+    const res = await app.request(`/xrpc/social.dept.obelisk.getFootprint?did=${ALICE}`, { headers: AUTH })
     const body = (await res.json()) as {
       watched: boolean
       totals: { records: number; deleted: number }
@@ -179,7 +183,7 @@ describe('per-DID footprint rollup', () => {
     // Default timeline hides the soft-deleted record.
     expect(body.records.map((r) => r.rkey).sort()).toEqual(['d1', 'p1'])
 
-    const withDeleted = await app.request(`/api/v1/footprint/${ALICE}?include_deleted=1`, { headers: AUTH })
+    const withDeleted = await app.request(`/xrpc/social.dept.obelisk.getFootprint?did=${ALICE}&includeDeleted=1`, { headers: AUTH })
     const full = (await withDeleted.json()) as { records: { rkey: string }[] }
     expect(full.records.map((r) => r.rkey).sort()).toEqual(['d1', 'd2', 'p1'])
   })
@@ -187,9 +191,9 @@ describe('per-DID footprint rollup', () => {
   test('watched DID is annotated on the footprint', async () => {
     const app = appWith(capturingTab())
     await seedAlice()
-    await app.request('/api/v1/watched-dids', { method: 'POST', headers: JSON_AUTH, body: JSON.stringify({ did: ALICE }) })
+    await app.request('/xrpc/social.dept.obelisk.addWatchedDid', { method: 'POST', headers: JSON_AUTH, body: JSON.stringify({ did: ALICE }) })
 
-    const res = await app.request(`/api/v1/watched-dids/${ALICE}/footprint`, { headers: AUTH })
+    const res = await app.request(`/xrpc/social.dept.obelisk.getFootprint?did=${ALICE}`, { headers: AUTH })
     const body = (await res.json()) as { watched: boolean; active?: boolean; snapshotAt: string | null }
     expect(body.watched).toBe(true)
     expect(body.active).toBe(true)

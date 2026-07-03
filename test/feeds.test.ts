@@ -75,7 +75,7 @@ describe('outlink audiences', () => {
       definition: { kind: 'outlink', did: READER, collection: 'site.standard.graph.subscription', path: 'publication' },
     })
 
-    const res = await app.request('/api/v1/audiences/reader-follows/members', { headers: AUTH })
+    const res = await app.request('/xrpc/social.dept.obelisk.getAudienceMembers?name=reader-follows', { headers: AUTH })
     expect(((await res.json()) as { members: string[] }).members).toEqual([AUTHOR])
   })
 })
@@ -84,7 +84,7 @@ describe('link.<path> event filter', () => {
   test('events narrowed to records linking to an exact target', async () => {
     await seedFollowing()
 
-    const res = await app.request(`/api/v1/events?link.site=${encodeURIComponent(FOLLOWED_PUB)}`, { headers: AUTH })
+    const res = await app.request(`/xrpc/social.dept.obelisk.getEvents?link.site=${encodeURIComponent(FOLLOWED_PUB)}`, { headers: AUTH })
     const body = (await res.json()) as { events: { rkey: string }[] }
 
     expect(body.events).toHaveLength(1)
@@ -96,7 +96,7 @@ describe('feed=following:<did>', () => {
   test('returns docs from followed publications only — not the same author elsewhere', async () => {
     await seedFollowing()
 
-    const res = await app.request(`/api/v1/events?feed=following:${READER}&collection=site.standard.document`, {
+    const res = await app.request(`/xrpc/social.dept.obelisk.getEvents?feed=following:${READER}&collection=site.standard.document`, {
       headers: AUTH,
     })
     const body = (await res.json()) as { events: { rkey: string }[] }
@@ -112,17 +112,17 @@ describe('feed=following:<did>', () => {
       makeEvent({ did: READER, collection: 'site.standard.graph.subscription', rkey: 'sub1', action: 'delete', record: null }),
     )
 
-    const res = await app.request(`/api/v1/events?feed=following:${READER}&collection=site.standard.document`, {
+    const res = await app.request(`/xrpc/social.dept.obelisk.getEvents?feed=following:${READER}&collection=site.standard.document`, {
       headers: AUTH,
     })
     expect(((await res.json()) as { events: unknown[] }).events).toHaveLength(0)
   })
 
   test('400 on malformed feed', async () => {
-    const bad = await app.request('/api/v1/events?feed=trending:whatever', { headers: AUTH })
+    const bad = await app.request('/xrpc/social.dept.obelisk.getEvents?feed=trending:whatever', { headers: AUTH })
     expect(bad.status).toBe(400)
 
-    const noDid = await app.request('/api/v1/events?feed=following:not-a-did', { headers: AUTH })
+    const noDid = await app.request('/xrpc/social.dept.obelisk.getEvents?feed=following:not-a-did', { headers: AUTH })
     expect(noDid.status).toBe(400)
   })
 

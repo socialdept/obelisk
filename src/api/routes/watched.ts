@@ -1,8 +1,8 @@
-import { Hono, type Context } from 'hono'
 import { and, desc, eq, isNull, lt, sql } from 'drizzle-orm'
 import type { Db } from '../../db/client'
 import { records, watchedDids, type WatchedDidRow } from '../../db/schema'
 import { TabAdmin } from '../../ingest/tab-admin'
+import type { ManageResult } from '../../webhooks/manage'
 import { parseLimit, serializeRecord } from './records'
 
 interface WatchedInput {
@@ -27,8 +27,6 @@ export interface FootprintOptions {
  * deleted before the DID was snapshotted were never seen (LAB-27 caveat).
  *
  * Works for ANY DID, watched or not — a watched row just annotates the response.
- * Shared by the /api/v1 route and the service-plane getFootprint method so both
- * planes run the same machinery.
  */
 export async function queryFootprint(db: Db, did: string, opts: FootprintOptions = {}) {
   const watchedRows = await db.select().from(watchedDids).where(eq(watchedDids.did, did)).limit(1)
@@ -78,7 +76,7 @@ export async function queryFootprint(db: Db, did: string, opts: FootprintOptions
   }
 }
 
-function serializeWatched(row: WatchedDidRow, enrolled?: boolean) {
+export function serializeWatched(row: WatchedDidRow, enrolled?: boolean) {
   return {
     did: row.did,
     note: row.note,
@@ -90,94 +88,77 @@ function serializeWatched(row: WatchedDidRow, enrolled?: boolean) {
   }
 }
 
-/** Management CRUD for the audit list. Adding/reactivating enrolls the DID in the
- *  footprint Tab (best-effort); removing/deactivating un-enrolls it. */
-export function watchedRoutes(db: Db, tab: TabAdmin): Hono {
-  const app = new Hono()
-
-  app.get('/', async (c) => {
-    const filters = c.req.query('active') === '1' ? [eq(watchedDids.active, true)] : []
-    const rows = await db
-      .select()
-      .from(watchedDids)
-      .where(and(...filters))
-      .orderBy(desc(watchedDids.addedAt))
-    return c.json({ watchedDids: rows.map((r) => serializeWatched(r)) })
-  })
-
-  app.post('/', async (c) => {
-    const input = (await c.req.json()) as WatchedInput
-    if (!input.did) return c.json({ error: 'did is required' }, 400)
-
-    const inserted = await db
-      .insert(watchedDids)
-      .values({ did: input.did, note: input.note ?? null, collections: input.collections ?? null })
-      .returning()
-      .catch(() => null)
-    if (!inserted) return c.json({ error: 'did already watched' }, 409)
-
-    const { enrolled } = await tab.addRepos([input.did])
-    return c.json({ watchedDid: serializeWatched(inserted[0]!, enrolled) }, 201)
-  })
-
-  app.get('/:did', async (c) => {
-    const row = await findWatched(db, c.req.param('did'))
-    if (!row) return c.json({ error: 'not found' }, 404)
-    return c.json({ watchedDid: serializeWatched(row) })
-  })
-
-  app.patch('/:did', async (c) => {
-    const row = await findWatched(db, c.req.param('did'))
-    if (!row) return c.json({ error: 'not found' }, 404)
-
-    const input = (await c.req.json()) as WatchedInput
-    const updates: Partial<typeof watchedDids.$inferInsert> = {}
-    if (input.note !== undefined) updates.note = input.note
-    if (input.collections !== undefined) updates.collections = input.collections
-    if (input.active !== undefined) updates.active = input.active
-
-    const updated = await db.update(watchedDids).set(updates).where(eq(watchedDids.id, row.id)).returning()
-
-    let enrolled: boolean | undefined
-    if (input.active !== undefined && input.active !== row.active) {
-      const result = input.active ? await tab.addRepos([row.did]) : await tab.removeRepos([row.did])
-      enrolled = result.enrolled
-    }
-    return c.json({ watchedDid: serializeWatched(updated[0]!, enrolled) })
-  })
-
-  app.delete('/:did', async (c) => {
-    const row = await findWatched(db, c.req.param('did'))
-    if (!row) return c.json({ error: 'not found' }, 404)
-
-    await db.delete(watchedDids).where(eq(watchedDids.id, row.id))
-    await tab.removeRepos([row.did])
-    return c.json({ deleted: true })
-  })
-
-  // Footprint of a watched DID — convenience alias for /api/v1/footprint/:did.
-  app.get('/:did/footprint', (c) => footprint(db, c))
-
-  return app
+export async function listWatched(db: Db, activeOnly: boolean) {
+  const filters = activeOnly ? [eq(watchedDids.active, true)] : []
+  const rows = await db
+    .select()
+    .from(watchedDids)
+    .where(and(...filters))
+    .orderBy(desc(watchedDids.addedAt))
+  return rows.map((r) => serializeWatched(r))
 }
 
-/** Per-DID footprint rollup for ANY DID (watched or not). */
-export function footprintRoutes(db: Db): Hono {
-  const app = new Hono()
-  app.get('/:did', (c) => footprint(db, c))
-  return app
+export async function getWatched(db: Db, did: string | undefined): Promise<ManageResult<object>> {
+  if (!did) return invalid('did is required')
+  const row = await findWatched(db, did)
+  if (!row) return notFound()
+  return { data: { watchedDid: serializeWatched(row) } }
 }
 
-async function footprint(db: Db, c: Context) {
-  const result = await queryFootprint(db, c.req.param('did')!, {
-    includeDeleted: c.req.query('include_deleted') === '1',
-    cursor: c.req.query('cursor'),
-    limit: c.req.query('limit') ? Number(c.req.query('limit')) : undefined,
-  })
-  return c.json(result)
+/** Add a watched DID and best-effort enroll it in the footprint Tab (LAB-29). */
+export async function addWatched(db: Db, tab: TabAdmin, input: WatchedInput): Promise<ManageResult<object>> {
+  if (!input.did) return invalid('did is required')
+
+  const inserted = await db
+    .insert(watchedDids)
+    .values({ did: input.did, note: input.note ?? null, collections: input.collections ?? null })
+    .returning()
+    .catch(() => null)
+  if (!inserted) return conflict('did already watched')
+
+  const { enrolled } = await tab.addRepos([input.did])
+  return { data: { watchedDid: serializeWatched(inserted[0]!, enrolled) } }
+}
+
+export async function updateWatched(db: Db, tab: TabAdmin, input: WatchedInput): Promise<ManageResult<object>> {
+  if (!input.did) return invalid('did is required')
+  const row = await findWatched(db, input.did)
+  if (!row) return notFound()
+
+  const updates: Partial<typeof watchedDids.$inferInsert> = {}
+  if (input.note !== undefined) updates.note = input.note
+  if (input.collections !== undefined) updates.collections = input.collections
+  if (input.active !== undefined) updates.active = input.active
+
+  const updated = await db.update(watchedDids).set(updates).where(eq(watchedDids.id, row.id)).returning()
+
+  let enrolled: boolean | undefined
+  if (input.active !== undefined && input.active !== row.active) {
+    const result = input.active ? await tab.addRepos([row.did]) : await tab.removeRepos([row.did])
+    enrolled = result.enrolled
+  }
+  return { data: { watchedDid: serializeWatched(updated[0]!, enrolled) } }
+}
+
+export async function removeWatched(
+  db: Db,
+  tab: TabAdmin,
+  did: string | undefined,
+): Promise<ManageResult<{ deleted: true }>> {
+  if (!did) return invalid('did is required')
+  const row = await findWatched(db, did)
+  if (!row) return notFound()
+
+  await db.delete(watchedDids).where(eq(watchedDids.id, row.id))
+  await tab.removeRepos([row.did])
+  return { data: { deleted: true } }
 }
 
 async function findWatched(db: Db, did: string): Promise<WatchedDidRow | undefined> {
   const rows = await db.select().from(watchedDids).where(eq(watchedDids.did, did)).limit(1)
   return rows[0]
 }
+
+const invalid = (message: string) => ({ error: 'InvalidRequest', message, status: 400 as const })
+const notFound = () => ({ error: 'NotFound', message: 'watched did not found', status: 404 as const })
+const conflict = (message: string) => ({ error: 'AlreadyExists', message, status: 409 as const })

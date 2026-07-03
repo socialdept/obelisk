@@ -1,4 +1,3 @@
-import { Hono } from 'hono'
 import { sql } from 'drizzle-orm'
 import type { Db } from '../../db/client'
 import { deriveTextFields, type ExternalResolver } from '../../lexicon/fields'
@@ -57,24 +56,6 @@ export async function getTypeDetail(db: Db, registry: LexiconRegistry, nsid: str
     textFields,
     members,
   }
-}
-
-export function typesRoutes(db: Db, registry: LexiconRegistry): Hono {
-  const app = new Hono()
-
-  app.get('/', async (c) => {
-    const types = await getTypeInventory(db, {
-      collection: c.req.query('collection'),
-      path: c.req.query('path'),
-    })
-    return c.json({ types })
-  })
-
-  app.get('/:nsid', async (c) => {
-    return c.json(await getTypeDetail(db, registry, c.req.param('nsid')))
-  })
-
-  return app
 }
 
 /**

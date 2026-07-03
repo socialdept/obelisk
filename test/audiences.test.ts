@@ -60,7 +60,7 @@ describe('audience membership', () => {
       definition: { kind: 'backlink', target: PUB_URI, collection: 'site.standard.graph.subscription', path: 'publication' },
     })
 
-    const before = await app.request('/api/v1/audiences/pub-subscribers/members', { headers: AUTH })
+    const before = await app.request('/xrpc/social.dept.obelisk.getAudienceMembers?name=pub-subscribers', { headers: AUTH })
     expect(((await before.json()) as { members: string[] }).members).toEqual(['did:plc:fan1', 'did:plc:fan2'])
 
     // fan2 deletes their subscription record on the network → drops out with zero bookkeeping.
@@ -69,7 +69,7 @@ describe('audience membership', () => {
       testConfig,
       makeEvent({ did: 'did:plc:fan2', collection: 'site.standard.graph.subscription', rkey: 'sub', action: 'delete', record: null }),
     )
-    const after = await app.request('/api/v1/audiences/pub-subscribers/members', { headers: AUTH })
+    const after = await app.request('/xrpc/social.dept.obelisk.getAudienceMembers?name=pub-subscribers', { headers: AUTH })
     expect(((await after.json()) as { members: string[] }).members).toEqual(['did:plc:fan1'])
   })
 
@@ -93,17 +93,17 @@ describe('audience membership', () => {
       },
     })
 
-    const res = await app.request('/api/v1/audiences/offprint-authors/members', { headers: AUTH })
+    const res = await app.request('/xrpc/social.dept.obelisk.getAudienceMembers?name=offprint-authors', { headers: AUTH })
     expect(((await res.json()) as { members: string[] }).members).toEqual(['did:plc:op'])
   })
 
   test('static audience and membership check endpoint', async () => {
     await db.insert(audiences).values({ name: 'vips', definition: { kind: 'static', dids: ['did:plc:a', 'did:plc:b'] } })
 
-    const yes = await app.request('/api/v1/audiences/vips/members/did:plc:a', { headers: AUTH })
+    const yes = await app.request('/xrpc/social.dept.obelisk.checkAudienceMember?name=vips&did=did:plc:a', { headers: AUTH })
     expect(((await yes.json()) as { member: boolean }).member).toBe(true)
 
-    const no = await app.request('/api/v1/audiences/vips/members/did:plc:z', { headers: AUTH })
+    const no = await app.request('/xrpc/social.dept.obelisk.checkAudienceMember?name=vips&did=did:plc:z', { headers: AUTH })
     expect(((await no.json()) as { member: boolean }).member).toBe(false)
   })
 })
@@ -120,7 +120,7 @@ describe('audience consumption', () => {
     await applyEvent(db, testConfig, makeEvent({ did: 'did:plc:rando', rkey: 'post2', record: { title: 'Rando post' } }))
 
     const res = await app.request(
-      '/api/v1/events?audience=pub-subscribers&collection=site.standard.document',
+      '/xrpc/social.dept.obelisk.getEvents?audience=pub-subscribers&collection=site.standard.document',
       { headers: AUTH },
     )
     const body = (await res.json()) as { events: { did: string }[] }
@@ -130,7 +130,7 @@ describe('audience consumption', () => {
   })
 
   test('events endpoint 400s on unknown audience', async () => {
-    const res = await app.request('/api/v1/events?audience=nope', { headers: AUTH })
+    const res = await app.request('/xrpc/social.dept.obelisk.getEvents?audience=nope', { headers: AUTH })
     expect(res.status).toBe(400)
   })
 
@@ -180,33 +180,39 @@ describe('audience consumption', () => {
 
 describe('audiences CRUD', () => {
   test('create validates definition', async () => {
-    const bad = await app.request('/api/v1/audiences', {
+    const bad = await app.request('/xrpc/social.dept.obelisk.createAudience', {
       method: 'POST',
       headers: JSON_AUTH,
       body: JSON.stringify({ name: 'broken', definition: { kind: 'backlink' } }),
     })
     expect(bad.status).toBe(400)
 
-    const good = await app.request('/api/v1/audiences', {
+    const good = await app.request('/xrpc/social.dept.obelisk.createAudience', {
       method: 'POST',
       headers: JSON_AUTH,
       body: JSON.stringify({ name: 'ok', definition: { kind: 'backlink', target: PUB_URI } }),
     })
-    expect(good.status).toBe(201)
+    expect(good.status).toBe(200)
   })
 
   test('duplicate name conflicts, delete removes', async () => {
     const make = () =>
-      app.request('/api/v1/audiences', {
+      app.request('/xrpc/social.dept.obelisk.createAudience', {
         method: 'POST',
         headers: JSON_AUTH,
         body: JSON.stringify({ name: 'dupe', definition: { kind: 'static', dids: [] } }),
       })
-    expect((await make()).status).toBe(201)
+    expect((await make()).status).toBe(200)
     expect((await make()).status).toBe(409)
 
-    const del = await app.request('/api/v1/audiences/dupe', { method: 'DELETE', headers: AUTH })
+    const del = await app.request('/xrpc/social.dept.obelisk.deleteAudience', {
+      method: 'POST',
+      headers: JSON_AUTH,
+      body: JSON.stringify({ name: 'dupe' }),
+    })
     expect(((await del.json()) as { deleted: boolean }).deleted).toBe(true)
-    expect((await app.request('/api/v1/audiences/dupe', { headers: AUTH })).status).toBe(404)
+    expect(
+      (await app.request('/xrpc/social.dept.obelisk.getAudience?name=dupe', { headers: AUTH })).status,
+    ).toBe(404)
   })
 })

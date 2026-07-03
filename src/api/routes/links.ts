@@ -1,4 +1,3 @@
-import { Hono } from 'hono'
 import { and, eq, or } from 'drizzle-orm'
 import type { Db } from '../../db/client'
 import type { ConstellationClient } from '../../constellation/client'
@@ -70,45 +69,6 @@ export async function queryNetworkBacklinks(
     data: result.data,
     meta: { cached: result.cached, stale: result.stale, fetchedAt: result.fetchedAt },
   }
-}
-
-/** Routes mounted under /records/:did/:collection/:rkey — link graph queries. */
-export function linksRoutes(db: Db, constellation: ConstellationClient): Hono {
-  const app = new Hono()
-
-  app.get('/:did/:collection/:rkey/links', async (c) => {
-    const uri = uriFromParams(c.req.param())
-    const links = await getRecordLinks(db, uri)
-    if (!links) return c.json({ error: 'record not found' }, 404)
-    return c.json({ uri, links })
-  })
-
-  app.get('/:did/:collection/:rkey/backlinks', async (c) => {
-    const uri = uriFromParams(c.req.param())
-    const backlinks = await queryBacklinks(db, uri, {
-      collection: c.req.query('collection'),
-      path: c.req.query('path'),
-    })
-    return c.json({ uri, backlinks })
-  })
-
-  app.get('/:did/:collection/:rkey/backlinks/network', async (c) => {
-    const uri = uriFromParams(c.req.param())
-    const result = await queryNetworkBacklinks(constellation, uri, {
-      collection: c.req.query('collection'),
-      path: c.req.query('path'),
-      count: c.req.query('count') === '1',
-      cursor: c.req.query('cursor'),
-    })
-    if (!result) return c.json({ error: 'constellation unavailable' }, 502)
-    return c.json({ uri, ...result })
-  })
-
-  return app
-}
-
-function uriFromParams(params: Record<string, string>): string {
-  return `at://${params.did}/${params.collection}/${params.rkey}`
 }
 
 async function recordByUri(db: Db, uri: string) {

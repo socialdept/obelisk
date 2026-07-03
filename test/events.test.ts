@@ -24,7 +24,7 @@ interface EventJson {
 }
 
 async function fetchEvents(qs = ''): Promise<{ events: EventJson[]; cursor: string | null }> {
-  const res = await app.request(`/api/v1/events${qs}`, { headers: AUTH })
+  const res = await app.request(`/xrpc/social.dept.obelisk.getEvents${qs}`, { headers: AUTH })
   expect(res.status).toBe(200)
   return (await res.json()) as { events: EventJson[]; cursor: string | null }
 }
@@ -72,7 +72,7 @@ describe('event log writes', () => {
   })
 })
 
-describe('GET /api/v1/events', () => {
+describe('GET /xrpc/social.dept.obelisk.getEvents', () => {
   test('cursor pagination is ordered, exclusive, and resumable', async () => {
     for (let i = 0; i < 5; i++) await applyEvent(db, testConfig, makeEvent({ rkey: `p${i}` }))
 
@@ -135,7 +135,7 @@ describe('GET /api/v1/events', () => {
   })
 
   test('rejects garbage cursor', async () => {
-    const res = await app.request('/api/v1/events?cursor=nope', { headers: AUTH })
+    const res = await app.request('/xrpc/social.dept.obelisk.getEvents?cursor=nope', { headers: AUTH })
     expect(res.status).toBe(400)
   })
 })

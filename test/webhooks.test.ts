@@ -172,39 +172,39 @@ describe('webhooks management API', () => {
   test('create returns secret once, defaults cursor to event head', async () => {
     await applyEvent(db, testConfig, makeEvent({ rkey: 'head' }))
 
-    const res = await app.request('/api/v1/webhooks', {
+    const res = await app.request('/xrpc/social.dept.obelisk.createWebhook', {
       method: 'POST',
       headers: JSON_AUTH,
       body: JSON.stringify({ name: 'laravel', url: 'http://laravel.test/hook' }),
     })
-    expect(res.status).toBe(201)
+    expect(res.status).toBe(200)
     const { webhook } = (await res.json()) as { webhook: { secret: string; cursor: string; id: number } }
     expect(webhook.secret).toHaveLength(64)
     expect(webhook.cursor).toBe('1')
 
-    const list = await app.request('/api/v1/webhooks', { headers: AUTH })
+    const list = await app.request('/xrpc/social.dept.obelisk.getWebhooks', { headers: AUTH })
     const body = (await list.json()) as { webhooks: Record<string, unknown>[] }
     expect(body.webhooks[0]!.secret).toBeUndefined()
   })
 
   test('duplicate name conflicts', async () => {
     const make = () =>
-      app.request('/api/v1/webhooks', {
+      app.request('/xrpc/social.dept.obelisk.createWebhook', {
         method: 'POST',
         headers: JSON_AUTH,
         body: JSON.stringify({ name: 'dupe', url: 'http://x.test' }),
       })
-    expect((await make()).status).toBe(201)
+    expect((await make()).status).toBe(200)
     expect((await make()).status).toBe(409)
   })
 
   test('patch rewinds cursor and reactivates', async () => {
     const id = await createSub({ status: 'failing', failureCount: 100, cursor: 50 })
 
-    const res = await app.request(`/api/v1/webhooks/${id}`, {
-      method: 'PATCH',
+    const res = await app.request('/xrpc/social.dept.obelisk.updateWebhook', {
+      method: 'POST',
       headers: JSON_AUTH,
-      body: JSON.stringify({ status: 'active', cursor: 10 }),
+      body: JSON.stringify({ id, status: 'active', cursor: 10 }),
     })
     const { webhook } = (await res.json()) as { webhook: { status: string; cursor: string; failureCount: number } }
 
@@ -213,17 +213,50 @@ describe('webhooks management API', () => {
     expect(webhook.failureCount).toBe(0)
   })
 
-  test('delete removes, test endpoint sends signed synthetic event', async () => {
+  test('delete removes, then get 404s', async () => {
     const id = await createSub({ secret: 'testsecret' })
 
-    const testApp = createApp({ db, config: testConfig, ollama: {} as OllamaClient })
-    // test endpoint uses global fetch — inject via route-level fetch by calling worker signer directly instead
-    const res = await app.request(`/api/v1/webhooks/${id}`, { method: 'DELETE', headers: AUTH })
+    const res = await app.request('/xrpc/social.dept.obelisk.deleteWebhook', {
+      method: 'POST',
+      headers: JSON_AUTH,
+      body: JSON.stringify({ id }),
+    })
     expect(((await res.json()) as { deleted: boolean }).deleted).toBe(true)
-    void testApp
 
-    const gone = await app.request(`/api/v1/webhooks/${id}`, { headers: AUTH })
+    const gone = await app.request(`/xrpc/social.dept.obelisk.getWebhook?id=${id}`, { headers: AUTH })
     expect(gone.status).toBe(404)
+  })
+
+  test('testWebhook delivers a signed synthetic event via injected fetch', async () => {
+    const id = await createSub({ secret: 'testsecret', url: 'http://laravel.test/hooks/test' })
+
+    let delivered:
+      | { url: string; signature: string; rawBody: string; body: { test: boolean; events: unknown[] } }
+      | undefined
+    const testFetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const headers = new Headers(init?.headers)
+      const rawBody = String(init?.body)
+      delivered = {
+        url: String(input),
+        signature: headers.get('X-Obelisk-Signature') ?? '',
+        rawBody,
+        body: JSON.parse(rawBody),
+      }
+      return new Response('ok', { status: 200 })
+    }) as typeof fetch
+
+    const testApp = createApp({ db, config: testConfig, ollama: {} as OllamaClient, fetchFn: testFetch })
+    const res = await testApp.request('/xrpc/social.dept.obelisk.testWebhook', {
+      method: 'POST',
+      headers: JSON_AUTH,
+      body: JSON.stringify({ id }),
+    })
+    const result = (await res.json()) as { delivered: boolean; status: number }
+    expect(result).toEqual({ delivered: true, status: 200 })
+    expect(delivered!.url).toBe('http://laravel.test/hooks/test')
+    expect(delivered!.body.test).toBe(true)
+    expect(delivered!.body.events).toHaveLength(1)
+    expect(delivered!.signature).toBe(signBody('testsecret', delivered!.rawBody))
   })
 
   test('signBody matches Laravel-side hash_hmac verification', () => {
