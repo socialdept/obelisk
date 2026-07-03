@@ -104,6 +104,7 @@ Obelisk's own cross-collection / archive operations, under the owned authority `
 | `getBacklinks?uri=&collection=&path=` | Records in the archive that reference a target |
 | `getNetworkBacklinks?uri=&collection=&path=&count=` | Network-wide backlinks via Constellation (cached, serve-stale) |
 | `getFootprint?did=&includeDeleted=&cursor=&limit=` | Everything for a DID across every collection: counts-by-collection (with deleted breakdown) + a unified timeline |
+| `getBackfillStatus?collection=&window=` | Backfill progress for a collection (omit `collection` for all) — records archived, repos seen/caught-up, backfill vs live ingest rate, and a drain-based `complete` flag |
 | `getWebhooks` / `getWebhook?id=` | List / fetch push subscriptions |
 | `getAudiences` / `getAudience?name=` | List / fetch query-defined DID sets |
 | `getAudienceMembers?name=&limit=&offset=` / `checkAudienceMember?name=&did=` | Resolve members / test membership |
@@ -124,8 +125,15 @@ Obelisk's own cross-collection / archive operations, under the owned authority `
 ```bash
 curl -H "$A" "localhost:3000/xrpc/social.dept.obelisk.getEvents?cursor=0&collection=site.standard.document"
 curl -H "$A" "localhost:3000/xrpc/social.dept.obelisk.getFootprint?did=did:plc:…&includeDeleted=1"
+curl -H "$A" "localhost:3000/xrpc/social.dept.obelisk.getBackfillStatus?collection=site.standard.document"
 curl -X POST -H "$A" "localhost:3000/xrpc/social.dept.obelisk.addWatchedDid" -d '{"did": "did:plc:…"}'
 ```
+
+### Backfill progress
+
+`getBackfillStatus` reads progress straight off the event log — no stored job state. Tab is the oracle: it marks historical records `live:false` and flips to `live:true` at the cutover, so a high `backfillRatePerSec` means history is still importing and a drained (zero) rate means the backfill is done (`complete: true`). You also get `recordsArchived`, `reposSeen`, `reposCaughtUp` (repos that reached the live stream), and `liveRatePerSec`.
+
+There is **no `%`-of-network** — `reposTotal` is always `null`. No atproto service exposes a per-collection record or repo count (Constellation only counts *backlinks to* a target; `site.standard.document` is a link source, so it's uncountable there), and Tab's tracked-repo count isn't wired yet. `complete` is inferred from the historical stream draining, which is robust to quiet repos but also reads a stalled ingester (Tab down) as done — check `lastHistoricalEventAt` to disambiguate.
 
 ### Filtering by record content
 

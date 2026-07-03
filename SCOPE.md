@@ -66,6 +66,9 @@ holds; the collection plane's write verbs stay `MethodNotImplemented`.
 - Type inventory + lexicon registry (`getTypes`), lexicon-derived extraction
 - Event log + cursor pull API, batched HMAC webhooks
 - Audiences (backlink / outlink / collection / static) and following feeds
+- Backfill progress (`getBackfillStatus`, LAB-34) — read off the event log via
+  Tab's `live:false→true` cutover; drain-based `complete`. No `%`-of-network:
+  no atproto service exposes a per-collection count (`reposTotal` stays null).
 - Dev mode, bearer-token auth
 
 ## In scope — now (closes the stated consumer needs)

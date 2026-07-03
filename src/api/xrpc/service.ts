@@ -22,6 +22,7 @@ import {
   updateWebhook,
   type ManageResult,
 } from '../../webhooks/manage'
+import { backfillStatus } from '../backfill'
 import { queryEvents } from '../routes/events'
 import { getRecordLinks, queryBacklinks, queryNetworkBacklinks } from '../routes/links'
 import { getTypeDetail, getTypeInventory } from '../routes/types'
@@ -78,6 +79,8 @@ export function handleServiceMethod(verb: string, c: XrpcContext, deps: ServiceD
       return getNetworkBacklinks(c, deps)
     case 'getFootprint':
       return getFootprint(c, deps)
+    case 'getBackfillStatus':
+      return getBackfillStatus(c, deps)
     case 'getWebhooks':
       return getWebhooks(c, deps)
     case 'getWebhook':
@@ -217,6 +220,14 @@ async function getFootprint(c: XrpcContext, { db }: ServiceDeps) {
       limit: numParam(c.req.query('limit')),
     }),
   )
+}
+
+async function getBackfillStatus(c: XrpcContext, { db }: ServiceDeps) {
+  const collection = c.req.query('collection')
+  const rows = await backfillStatus(db, { collection, windowSeconds: numParam(c.req.query('window')) })
+  // Scoped to one collection → the object; otherwise the whole set.
+  if (collection) return c.json(rows[0]!)
+  return c.json({ collections: rows })
 }
 
 async function getWebhooks(c: XrpcContext, { db }: ServiceDeps) {
