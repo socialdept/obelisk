@@ -1,0 +1,105 @@
+import { sql } from 'drizzle-orm'
+import {
+  bigint,
+  bigserial,
+  customType,
+  index,
+  integer,
+  jsonb,
+  pgTable,
+  text,
+  timestamp,
+  uniqueIndex,
+  varchar,
+  vector,
+} from 'drizzle-orm/pg-core'
+
+const tsvector = customType<{ data: string }>({
+  dataType: () => 'tsvector',
+})
+
+export const records = pgTable(
+  'records',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    did: varchar('did', { length: 255 }).notNull(),
+    collection: varchar('collection', { length: 255 }).notNull(),
+    rkey: varchar('rkey', { length: 255 }).notNull(),
+    uri: text('uri')
+      .generatedAlwaysAs(sql`'at://' || did || '/' || collection || '/' || rkey`)
+      .notNull(),
+    cid: varchar('cid', { length: 255 }),
+    rev: varchar('rev', { length: 255 }),
+    record: jsonb('record').notNull().default({}),
+    searchable: tsvector('searchable').generatedAlwaysAs(
+      sql`setweight(to_tsvector('english', coalesce(record->>'title', record->>'name', '')), 'A') || setweight(to_tsvector('english', coalesce(record->>'description', '')), 'B') || setweight(to_tsvector('english', coalesce(record->>'textContent', '')), 'C')`,
+    ),
+    embedStatus: varchar('embed_status', { length: 20 }).notNull().default('skipped'),
+    embedAttempts: integer('embed_attempts').notNull().default(0),
+    indexedAt: timestamp('indexed_at', { withTimezone: true }).notNull().defaultNow(),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex('records_did_collection_rkey_key').on(table.did, table.collection, table.rkey),
+    index('records_collection_idx').on(table.collection),
+    index('records_uri_idx').on(table.uri),
+  ],
+)
+
+export const recordEmbeddings = pgTable(
+  'record_embeddings',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    recordId: bigint('record_id', { mode: 'number' })
+      .notNull()
+      .references(() => records.id, { onDelete: 'cascade' }),
+    chunkIndex: integer('chunk_index').notNull(),
+    chunkText: text('chunk_text').notNull(),
+    embedding: vector('embedding', { dimensions: 768 }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex('record_embeddings_record_chunk_key').on(table.recordId, table.chunkIndex)],
+)
+
+export const recordLinks = pgTable(
+  'record_links',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    recordId: bigint('record_id', { mode: 'number' })
+      .notNull()
+      .references(() => records.id, { onDelete: 'cascade' }),
+    path: varchar('path', { length: 500 }).notNull(),
+    targetUri: text('target_uri').notNull(),
+    targetDid: varchar('target_did', { length: 255 }),
+    targetCollection: varchar('target_collection', { length: 255 }),
+    targetRkey: varchar('target_rkey', { length: 255 }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('record_links_record_path_target_key').on(table.recordId, table.path, table.targetUri),
+    index('record_links_target_uri_idx').on(table.targetUri),
+    index('record_links_target_did_idx').on(table.targetDid),
+  ],
+)
+
+export const constellationCache = pgTable('constellation_cache', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  cacheKey: varchar('cache_key', { length: 64 }).notNull().unique(),
+  endpoint: varchar('endpoint', { length: 100 }).notNull(),
+  target: text('target').notNull(),
+  collection: varchar('collection', { length: 255 }),
+  path: varchar('path', { length: 500 }),
+  response: jsonb('response').notNull(),
+  fetchedAt: timestamp('fetched_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const apiTokens = pgTable('api_tokens', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  name: varchar('name', { length: 255 }).notNull(),
+  tokenHash: varchar('token_hash', { length: 64 }).notNull().unique(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+})
+
+export type RecordRow = typeof records.$inferSelect
+export type RecordLinkRow = typeof recordLinks.$inferSelect
