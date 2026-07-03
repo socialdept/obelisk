@@ -1,0 +1,12 @@
+{
+  "name": "reservoir",
+  "version": "0.1.0",
+  "description": "Self-hosted AT Protocol record archive with keyword and vector search",
+  "type": "module",
+  "scripts": {
+    "dev": "bun run --watch src/index.ts",
+    "start": "bun run src/index.ts",
+    "migrate": "bun run src/db/migrate.ts",
+    "test": "bun test"
+  }
+}
