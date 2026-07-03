@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import type { ReservoirConfig } from '../config'
+import type { ObeliskConfig } from '../config'
 import { ConstellationClient } from '../constellation/client'
 import type { Db } from '../db/client'
 import type { OllamaClient } from '../embed/ollama'
@@ -16,7 +16,7 @@ import { xrpcRoutes } from './xrpc/collections'
 
 export interface ApiDeps {
   db: Db
-  config: ReservoirConfig
+  config: ObeliskConfig
   ollama: OllamaClient
   constellation?: ConstellationClient
   lexicons?: LexiconRegistry
@@ -31,7 +31,7 @@ export function createApp({ db, config, ollama, constellation, lexicons, devMode
 
   const v1 = new Hono()
   if (devMode) {
-    console.warn('⚠️  RESERVOIR_DEV_MODE — API authentication is DISABLED')
+    console.warn('⚠️  OBELISK_DEV_MODE — API authentication is DISABLED')
   } else {
     v1.use('*', bearerAuth(db))
   }

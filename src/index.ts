@@ -52,4 +52,4 @@ webhookWorker.start()
 const app = createApp({ db, config, ollama, lexicons, devMode: env.devMode })
 const server = Bun.serve({ port: env.port, fetch: app.fetch, idleTimeout: 60 })
 
-console.log(`reservoir: ingesting + embedding, api on :${env.port}`)
+console.log(`obelisk: ingesting + embedding, api on :${env.port}`)

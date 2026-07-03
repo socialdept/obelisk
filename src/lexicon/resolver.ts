@@ -8,7 +8,7 @@ export interface ResolverDeps {
 const defaultDeps: ResolverDeps = {
   lookupTxt: resolveTxt,
   fetchJson: async (url) => {
-    const response = await fetch(url, { headers: { 'User-Agent': 'reservoir (miguel)' } })
+    const response = await fetch(url, { headers: { 'User-Agent': 'obelisk (miguel)' } })
     if (!response.ok) throw new Error(`${url} → ${response.status}`)
     return response.json()
   },

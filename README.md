@@ -1,10 +1,10 @@
-# Reservoir
+# Obelisk
 
-A self-hosted archive of AT Protocol records with keyword and vector search.
+> **Social Dept. Obelisk** — a self-hostable archive of AT Protocol records with keyword and vector search. A monument of records built to outlast the network: it keeps what the network deletes.
 
 ## What
 
-Reservoir syncs configurable AT Protocol collections from the network (via [Tab](https://tangled.org/pds.dad/tab), a [Tap](https://docs.bsky.app/blog/introducing-tap) fork), holds a permanent archive of every record it sees, and exposes an authenticated HTTP API for querying:
+Obelisk syncs configurable AT Protocol collections from the network (via [Tab](https://tangled.org/pds.dad/tab), a [Tap](https://docs.bsky.app/blog/introducing-tap) fork), holds a permanent archive of every record it sees, and exposes an authenticated HTTP API for querying:
 
 - Records by DID, collection, or rkey
 - Full-text keyword search over record content
@@ -18,13 +18,13 @@ Deletions on the network become soft deletes — the archive remembers, queries 
 
 **The question this POC answers:** can Tab + a single Bun app + pgvector deliver a safe, queryable, semantically searchable AT Protocol archive?
 
-A previous attempt using Tap's webhook delivery flooded the receiving app during backfill (hundreds of requests/sec). Reservoir consumes Tab's acknowledged websocket directly with in-process batching — backpressure by construction.
+A previous attempt using Tap's webhook delivery flooded the receiving app during backfill (hundreds of requests/sec). Obelisk consumes Tab's acknowledged websocket directly with in-process batching — backpressure by construction.
 
 > Scope, boundaries, and the feature roadmap live in [SCOPE.md](./SCOPE.md) — new ideas get tested against it before they get issues.
 
 ## Design principle
 
-**Generalized to any lexicon, always.** Behavior is derived from published lexicon schemas wherever possible (the registry resolves any NSID from the network); where derivation can't work, there's a config extension point anyone can fill (`reservoir.config.ts` — collections, field overrides, following semantics). Features that would require hardcoding a specific lexicon don't ship. Standard.site collections are the *default config*, not assumptions in code.
+**Generalized to any lexicon, always.** Behavior is derived from published lexicon schemas wherever possible (the registry resolves any NSID from the network); where derivation can't work, there's a config extension point anyone can fill (`obelisk.config.ts` — collections, field overrides, following semantics). Features that would require hardcoding a specific lexicon don't ship. Standard.site collections are the *default config*, not assumptions in code.
 
 In practice: the collections config is just a list of NSIDs. Title fields, prose fields, and rich-content locations are read from each collection's own lexicon (`titleFields`/`textFields`/`richContentFields` exist as per-collection overrides for unpublished or wrong lexicons). Full-text search runs over worker-materialized `extracted_title` (weight A) + `extracted_text` (weight C) — no record-shape assumptions in SQL. `scripts/extract-all.ts` re-extracts the whole archive after extraction-rule changes (fast, no re-embedding).
 
@@ -36,7 +36,7 @@ In practice: the collections config is just a list of NSIDs. Title fields, prose
 - **Ollama** (`nomic-embed-text`) for embeddings
 - **Hono** API with bearer token auth
 
-Target collections (configurable in `reservoir.config.ts`): `site.standard.document`, `site.standard.publication`, `site.standard.graph.subscription`, `site.standard.graph.recommend`.
+Target collections (configurable in `obelisk.config.ts`): `site.standard.document`, `site.standard.publication`, `site.standard.graph.subscription`, `site.standard.graph.recommend`.
 
 ## Running it
 
@@ -81,7 +81,7 @@ curl -X POST "localhost:3000/xrpc/site.standard.document.countRecords" -d '{"whe
 curl -X POST "localhost:3000/xrpc/site.standard.document.searchRecords" -d '{"q": "atproto", "semantic": true}'
 ```
 
-`where` supports record fields (dot paths like `content.$type`), system fields (`did`, `collection`, `rkey`, `uri`, `cid`, `indexedAt`), and the special `json` field (whole-record search). Responses use atproto conventions (`{uri, cid, did, collection, value, indexedAt}`, `{error, message}` errors). Write verbs return `MethodNotImplemented` — reservoir is a read-only archive.
+`where` supports record fields (dot paths like `content.$type`), system fields (`did`, `collection`, `rkey`, `uri`, `cid`, `indexedAt`), and the special `json` field (whole-record search). Responses use atproto conventions (`{uri, cid, did, collection, value, indexedAt}`, `{error, message}` errors). Write verbs return `MethodNotImplemented` — Obelisk is a read-only archive.
 
 ### REST (service endpoints)
 
@@ -117,7 +117,7 @@ Use `GET /api/v1/types` to discover which `$type` values exist before filtering.
 
 **Pull:** `GET /api/v1/events?cursor=<last-seen>&collection=…&include_record=1` returns applied changes in order with a resumable cursor — poll it from a scheduled job, persist the cursor, replay any time by rewinding it. The log only contains *applied* changes (redelivered/stale sync events never appear), so consumers see no duplicates.
 
-**Push:** create a webhook subscription and reservoir delivers the same events as batched, HMAC-signed POSTs — full batch immediately, partial batch at most once per `max_wait_ms`, so your endpoint is never flooded:
+**Push:** create a webhook subscription and Obelisk delivers the same events as batched, HMAC-signed POSTs — full batch immediately, partial batch at most once per `max_wait_ms`, so your endpoint is never flooded:
 
 ```bash
 curl -X POST … "localhost:3000/api/v1/webhooks" -d '{
@@ -159,11 +159,11 @@ curl … "localhost:3000/api/v1/events?feed=following:did:plc:xyz&collection=sit
 curl … "localhost:3000/api/v1/events?link.site=at://did:plc:…/site.standard.publication/self"
 ```
 
-Following semantics (which collection/link path expresses "following") are configurable in `reservoir.config.ts` under `feeds.following` — not hardcoded to Standard.site.
+Following semantics (which collection/link path expresses "following") are configurable in `obelisk.config.ts` under `feeds.following` — not hardcoded to Standard.site.
 
 ### Dev mode
 
-`RESERVOIR_DEV_MODE=true` disables API auth entirely (loud warning at boot). Local development only.
+`OBELISK_DEV_MODE=true` disables API auth entirely (loud warning at boot). Local development only.
 
 ## Status
 

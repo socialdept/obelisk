@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm'
-import type { ReservoirConfig } from '../config'
+import type { ObeliskConfig } from '../config'
 import type { Db } from '../db/client'
 import { constellationCache } from '../db/schema'
 
@@ -27,7 +27,7 @@ export interface ConstellationResult {
 export class ConstellationClient {
   constructor(
     private readonly db: Db,
-    private readonly config: ReservoirConfig['constellation'],
+    private readonly config: ObeliskConfig['constellation'],
   ) {}
 
   async query(endpoint: ConstellationEndpoint, params: ConstellationParams): Promise<ConstellationResult> {

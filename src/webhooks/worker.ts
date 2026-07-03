@@ -1,7 +1,7 @@
 import { createHmac } from 'node:crypto'
 import { and, asc, eq, gt, inArray, lte, sql, type SQL } from 'drizzle-orm'
 import { audienceFilter, findAudience } from '../audiences/definition'
-import type { ReservoirConfig } from '../config'
+import type { ObeliskConfig } from '../config'
 import type { Db } from '../db/client'
 import { events, records, webhookSubscriptions, type WebhookSubscription } from '../db/schema'
 import { buildFeedFilter } from '../feeds/filter'
@@ -29,7 +29,7 @@ export class WebhookWorker {
 
   constructor(
     private readonly db: Db,
-    private readonly config: ReservoirConfig,
+    private readonly config: ObeliskConfig,
     private readonly fetchFn: FetchFn = fetch,
     private readonly idleMs = 1000,
   ) {}
@@ -152,9 +152,9 @@ export class WebhookWorker {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Reservoir-Subscription': sub.name,
-          'X-Reservoir-Cursor': cursor,
-          'X-Reservoir-Signature': signBody(sub.secret, body),
+          'X-Obelisk-Subscription': sub.name,
+          'X-Obelisk-Cursor': cursor,
+          'X-Obelisk-Signature': signBody(sub.secret, body),
         },
         body,
       })

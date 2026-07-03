@@ -11,5 +11,5 @@
     "skipLibCheck": true,
     "verbatimModuleSyntax": true
   },
-  "include": ["src", "scripts", "test", "reservoir.config.ts", "drizzle.config.ts"]
+  "include": ["src", "scripts", "test", "obelisk.config.ts", "drizzle.config.ts"]
 }

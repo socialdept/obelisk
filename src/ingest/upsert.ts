@@ -1,5 +1,5 @@
 import { and, eq } from 'drizzle-orm'
-import type { ReservoirConfig } from '../config'
+import type { ObeliskConfig } from '../config'
 import type { Db } from '../db/client'
 import { events, recordLinks, recordTypes, records } from '../db/schema'
 import { extractLinks } from './links'
@@ -29,7 +29,7 @@ type Tx = Db | Parameters<Parameters<Db['transaction']>[0]>[0]
  */
 export async function applyEvent(
   tx: Tx,
-  config: ReservoirConfig,
+  config: ObeliskConfig,
   event: RecordEvent,
 ): Promise<UpsertResult> {
   if (event.type !== 'record') return 'skipped'
@@ -82,7 +82,7 @@ async function applyDelete(tx: Tx, event: RecordEvent, existingId?: number): Pro
 
 async function applyWrite(
   tx: Tx,
-  config: ReservoirConfig,
+  config: ObeliskConfig,
   event: RecordEvent,
   existing: { id: number; cid: string | null } | undefined,
 ): Promise<UpsertResult> {

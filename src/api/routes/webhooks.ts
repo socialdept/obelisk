@@ -123,7 +123,7 @@ export function webhooksRoutes(db: Db, fetchFn: FetchFn = fetch): Hono {
           rev: '3test',
           live: true,
           createdAt: new Date().toISOString(),
-          record: { $type: 'site.standard.document', title: 'Reservoir test event' },
+          record: { $type: 'site.standard.document', title: 'Obelisk test event' },
         },
       ],
     })
@@ -133,9 +133,9 @@ export function webhooksRoutes(db: Db, fetchFn: FetchFn = fetch): Hono {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Reservoir-Subscription': sub.name,
-          'X-Reservoir-Cursor': String(sub.cursor),
-          'X-Reservoir-Signature': signBody(sub.secret, body),
+          'X-Obelisk-Subscription': sub.name,
+          'X-Obelisk-Cursor': String(sub.cursor),
+          'X-Obelisk-Signature': signBody(sub.secret, body),
         },
         body,
       })

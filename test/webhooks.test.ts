@@ -34,7 +34,7 @@ const fakeFetch = (async (input: string | URL | Request, init?: RequestInit) => 
   deliveries.push({
     url: String(input),
     body: JSON.parse(String(init?.body)),
-    signature: headers.get('X-Reservoir-Signature') ?? '',
+    signature: headers.get('X-Obelisk-Signature') ?? '',
     rawBody: String(init?.body),
   })
   return respondWith()

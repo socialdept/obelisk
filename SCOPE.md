@@ -1,6 +1,6 @@
 # Scope
 
-What reservoir is, what it will become, and what it refuses to be. When a
+What Obelisk is, what it will become, and what it refuses to be. When a
 feature idea shows up, it gets tested against this file before it gets an
 issue.
 
@@ -10,7 +10,7 @@ A **self-hostable, lexicon-generic, queryable archive** of AT Protocol
 records. Applications (first consumer: Offprint) point it at collections,
 then query and subscribe over an authenticated HTTP API. App-specific
 behavior lives in **config and data** (collection lists, audiences, record
-matchers, feed definitions) — never in reservoir code.
+matchers, feed definitions) — never in Obelisk code.
 
 Reference point for the shape we're aiming at:
 [slices](https://tangled.org/slices.network/slices) — "host your own
@@ -22,7 +22,7 @@ AppView" — minus the write path, plus search/vectors/webhooks/link-graph.
    schemas; where derivation can't work, there's a config extension point a
    third party could fill; otherwise the feature doesn't ship. Standard.site
    is default config, not a code assumption. (See README "Design principle".)
-2. **Read-only.** Reservoir archives and serves the network — it never
+2. **Read-only.** Obelisk archives and serves the network — it never
    writes records to PDSes. Write paths belong to the consuming app (e.g.
    Offprint via `socialdept/atp-client`). No OAuth-as-a-user, no CRUD.
 3. **Single self-hostable unit.** One Bun process + Postgres + Tab. Features
@@ -47,8 +47,10 @@ AppView" — minus the write path, plus search/vectors/webhooks/link-graph.
   `/xrpc/site.standard.document.getRecords`), with a `where` filter DSL
   (`eq`/`contains`/`in`, record + system fields), `sortBy`, cursor
   pagination, and standard atproto error bodies. Read-only verbs only.
-  Service-level endpoints (events/webhooks/audiences) keep `/api/v1` until a
-  reservoir NSID namespace is chosen.
+  Service-level endpoints (events/webhooks/audiences) keep `/api/v1` until
+  migrated to Obelisk's own service namespace, **`social.dept.obelisk.*`**
+  (authority = the owned domain `dept.social`; read ops move first,
+  management CRUD may stay REST).
 - **Time-range filters + ordering on `/events`** (`since`/`until`, desc) —
   "when did publications we maintain change their records"
 - **Generic aggregation/stats endpoints** — counts and group-bys over
@@ -76,7 +78,7 @@ AppView" — minus the write path, plus search/vectors/webhooks/link-graph.
 - **Identity/handle resolution as a product feature** — store DIDs; consumers
   resolve handles (revisit only if a consumer need makes it unavoidable)
 - **Being an AppView SDK platform** (slices' lexicon-authoring + SDK
-  generation) — reservoir consumes lexicons, it doesn't author them
+  generation) — Obelisk consumes lexicons, it doesn't author them
 
 ## How to use this file
 

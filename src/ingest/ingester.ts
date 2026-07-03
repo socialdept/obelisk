@@ -1,4 +1,4 @@
-import type { ReservoirConfig } from '../config'
+import type { ObeliskConfig } from '../config'
 import type { Db } from '../db/client'
 import { applyEvent, type RecordEvent } from './upsert'
 
@@ -39,7 +39,7 @@ export class Ingester {
 
   constructor(
     private readonly db: Db,
-    private readonly config: ReservoirConfig,
+    private readonly config: ObeliskConfig,
     options: IngesterOptions = {},
   ) {
     this.batchSize = options.batchSize ?? 200

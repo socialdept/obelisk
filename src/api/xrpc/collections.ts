@@ -54,7 +54,7 @@ export function xrpcRoutes(db: Db, ollama: OllamaClient): Hono {
       case 'createRecord':
       case 'updateRecord':
       case 'deleteRecord':
-        return xrpcError(c, 501, 'MethodNotImplemented', 'reservoir is a read-only archive — writes go through your PDS')
+        return xrpcError(c, 501, 'MethodNotImplemented', 'obelisk is a read-only archive — writes go through your PDS')
       default:
         return xrpcError(c, 501, 'MethodNotImplemented', `unknown method suffix: ${verb}`)
     }

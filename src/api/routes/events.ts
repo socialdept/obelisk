@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { and, asc, eq, gt, sql, type SQL } from 'drizzle-orm'
 import { audienceFilter, findAudience } from '../../audiences/definition'
-import type { ReservoirConfig } from '../../config'
+import type { ObeliskConfig } from '../../config'
 import type { Db } from '../../db/client'
 import { events, records } from '../../db/schema'
 import { buildFeedFilter, linkFilters } from '../../feeds/filter'
@@ -9,7 +9,7 @@ import { recordJsonFilters } from './records'
 
 const MAX_LIMIT = 500
 
-export function eventsRoutes(db: Db, config: ReservoirConfig): Hono {
+export function eventsRoutes(db: Db, config: ObeliskConfig): Hono {
   const app = new Hono()
 
   app.get('/', async (c) => {

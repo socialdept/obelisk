@@ -1,5 +1,5 @@
 import { sql, type SQL } from 'drizzle-orm'
-import type { ReservoirConfig } from '../config'
+import type { ObeliskConfig } from '../config'
 import type { Db } from '../db/client'
 
 /**
@@ -40,7 +40,7 @@ export function linkFilters(query: Record<string, string>, recordIdColumn: SQL):
 export async function buildFeedFilter(
   db: Db,
   feed: string,
-  config: ReservoirConfig,
+  config: ObeliskConfig,
   recordIdColumn: SQL,
 ): Promise<{ filter: SQL } | { error: string }> {
   if (!feed.startsWith('following:')) return { error: `unknown feed type: ${feed}` }

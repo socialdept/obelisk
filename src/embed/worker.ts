@@ -1,6 +1,6 @@
 import { sql } from 'drizzle-orm'
 import { eq } from 'drizzle-orm'
-import type { ReservoirConfig } from '../config'
+import type { ObeliskConfig } from '../config'
 import type { Db } from '../db/client'
 import { recordEmbeddings, records } from '../db/schema'
 import { chunkText } from './chunk'
@@ -37,7 +37,7 @@ export class EmbedWorker {
 
   constructor(
     private readonly db: Db,
-    private readonly config: ReservoirConfig,
+    private readonly config: ObeliskConfig,
     private readonly ollama: OllamaClient,
     options: EmbedWorkerOptions = {},
   ) {

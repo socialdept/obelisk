@@ -11,7 +11,7 @@ export interface CollectionConfig {
   richContentFields?: string[]
 }
 
-export interface ReservoirConfig {
+export interface ObeliskConfig {
   collections: Record<string, CollectionConfig>
   ollama: {
     model: string
@@ -50,19 +50,19 @@ export function loadEnv(): Env {
     tabWsUrl: process.env.TAB_WS_URL ?? 'ws://localhost:2480',
     ollamaUrl: process.env.OLLAMA_URL ?? 'http://127.0.0.1:11434',
     port: Number(process.env.PORT ?? 3000),
-    devMode: process.env.RESERVOIR_DEV_MODE === 'true',
+    devMode: process.env.OBELISK_DEV_MODE === 'true',
   }
 }
 
-export async function loadConfig(): Promise<ReservoirConfig> {
-  const { default: config } = await import('../reservoir.config')
+export async function loadConfig(): Promise<ObeliskConfig> {
+  const { default: config } = await import('../obelisk.config')
   validateConfig(config)
   return config
 }
 
-function validateConfig(config: ReservoirConfig): void {
+function validateConfig(config: ObeliskConfig): void {
   if (Object.keys(config.collections).length === 0) {
-    throw new Error('reservoir.config.ts must define at least one collection')
+    throw new Error('obelisk.config.ts must define at least one collection')
   }
   if (config.ollama.chunkOverlap >= config.ollama.chunkChars) {
     throw new Error('ollama.chunkOverlap must be smaller than ollama.chunkChars')

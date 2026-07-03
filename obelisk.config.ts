@@ -1,4 +1,4 @@
-import type { ReservoirConfig } from './src/config'
+import type { ObeliskConfig } from './src/config'
 
 export default {
   // Field locations (title/prose/rich content) are derived from each
@@ -20,7 +20,7 @@ export default {
   constellation: {
     baseUrl: 'https://constellation.microcosm.blue',
     ttlSeconds: 3600,
-    userAgent: 'reservoir (miguel)',
+    userAgent: 'obelisk (@socialde.pt)',
   },
   feeds: {
     following: {
@@ -28,4 +28,4 @@ export default {
       path: 'publication',
     },
   },
-} satisfies ReservoirConfig
+} satisfies ObeliskConfig

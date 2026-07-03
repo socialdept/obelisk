@@ -1,7 +1,7 @@
 import postgres from 'postgres'
 import { createDb, type Db } from '../src/db/client'
 import { migrate } from '../src/db/migrate'
-import type { ReservoirConfig } from '../src/config'
+import type { ObeliskConfig } from '../src/config'
 import type { RecordEvent } from '../src/ingest/upsert'
 
 const ADMIN_URL = process.env.TEST_ADMIN_DATABASE_URL ?? 'postgres://reservoir:reservoir@localhost:5432/reservoir'
@@ -28,7 +28,7 @@ export async function truncateAll(db: Db): Promise<void> {
   )
 }
 
-export const testConfig: ReservoirConfig = {
+export const testConfig: ObeliskConfig = {
   collections: {
     'site.standard.document': { textFields: ['title', 'description', 'textContent'] },
     'site.standard.publication': { textFields: ['name', 'description'] },
@@ -36,7 +36,7 @@ export const testConfig: ReservoirConfig = {
     'site.standard.graph.recommend': {},
   },
   ollama: { model: 'nomic-embed-text', dimensions: 768, chunkChars: 1800, chunkOverlap: 200 },
-  constellation: { baseUrl: 'https://constellation.example', ttlSeconds: 3600, userAgent: 'reservoir-test' },
+  constellation: { baseUrl: 'https://constellation.example', ttlSeconds: 3600, userAgent: 'obelisk-test' },
   feeds: { following: { collection: 'site.standard.graph.subscription', path: 'publication' } },
 }
 

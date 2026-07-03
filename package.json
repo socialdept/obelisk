@@ -1,5 +1,5 @@
 {
-  "name": "reservoir",
+  "name": "obelisk",
   "version": "0.1.0",
   "description": "Self-hosted AT Protocol record archive with keyword and vector search",
   "type": "module",
