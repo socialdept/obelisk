@@ -5,19 +5,22 @@ import { records } from '../../db/schema'
 
 const MAX_LIMIT = 100
 
-/**
- * Filters on record JSON fields via `record.<path>=<value>` query params,
- * e.g. ?record.content.$type=app.offprint.content
- */
-export function recordJsonFilters(query: Record<string, string>): SQL[] {
-  const filters: SQL[] = []
-  for (const [key, value] of Object.entries(query)) {
-    if (!key.startsWith('record.')) continue
-    const parts = key.slice('record.'.length).split('.')
+/** Equality filters against record JSON, e.g. { "content.$type": "app.offprint.content" }. */
+export function jsonMatcherFilters(matchers: Record<string, string>): SQL[] {
+  return Object.entries(matchers).map(([path, value]) => {
+    const parts = path.split('.')
     const args = sql.join(parts.map((part) => sql`${part}`), sql`, `)
-    filters.push(sql`jsonb_extract_path_text(${records.record}, ${args}) = ${value}`)
+    return sql`jsonb_extract_path_text(${records.record}, ${args}) = ${value}`
+  })
+}
+
+/** Same, sourced from `record.<path>=<value>` query params. */
+export function recordJsonFilters(query: Record<string, string>): SQL[] {
+  const matchers: Record<string, string> = {}
+  for (const [key, value] of Object.entries(query)) {
+    if (key.startsWith('record.')) matchers[key.slice('record.'.length)] = value
   }
-  return filters
+  return jsonMatcherFilters(matchers)
 }
 
 export function recordFilters(query: {

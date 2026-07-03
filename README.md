@@ -68,6 +68,7 @@ Useful flags: `include_deleted=1` (see soft-deleted records), `cursor` (paginati
 | `GET /api/v1/types` | Inventory of `$type` values observed in the archive, by path, with counts |
 | `GET /api/v1/types/:nsid` | Usage + resolved lexicon schema + derived text fields + observed union members |
 | `GET /api/v1/events` | Cursor-paged change log — poll it to react to new/updated/deleted records |
+| `/api/v1/webhooks` CRUD | Batched push subscriptions over the event log (HMAC-signed) |
 
 ### Filtering by record content
 
@@ -84,7 +85,22 @@ Use `GET /api/v1/types` to discover which `$type` values exist before filtering.
 
 ### Consuming changes (Laravel etc.)
 
-`GET /api/v1/events?cursor=<last-seen>&collection=…&include_record=1` returns applied changes in order with a resumable cursor — poll it from a scheduled job, persist the cursor, replay any time by rewinding it. The log only contains *applied* changes (redelivered/stale sync events never appear), so consumers see no duplicates. Batched webhook push is planned (LAB-15).
+**Pull:** `GET /api/v1/events?cursor=<last-seen>&collection=…&include_record=1` returns applied changes in order with a resumable cursor — poll it from a scheduled job, persist the cursor, replay any time by rewinding it. The log only contains *applied* changes (redelivered/stale sync events never appear), so consumers see no duplicates.
+
+**Push:** create a webhook subscription and reservoir delivers the same events as batched, HMAC-signed POSTs — full batch immediately, partial batch at most once per `max_wait_ms`, so your endpoint is never flooded:
+
+```bash
+curl -X POST … "localhost:3000/api/v1/webhooks" -d '{
+  "name": "my-laravel-app",
+  "url": "http://laravel.test/hooks/reservoir",
+  "collections": ["site.standard.document"],
+  "record_matchers": { "content.$type": "app.offprint.content" },
+  "max_events": 200, "max_wait_ms": 5000,
+  "from_cursor": "start"
+}'   # → returns the signing secret ONCE — store it
+```
+
+Verify with `hash_equals('sha256='.hash_hmac('sha256', $body, $secret), $sigHeader)`. Delivery is at-least-once with per-subscription cursor: failures back off exponentially and never advance the cursor, `PATCH {"cursor": N}` rewinds for replay, `POST /webhooks/:id/test` sends a synthetic signed event.
 
 ### Dev mode
 

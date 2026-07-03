@@ -140,6 +140,27 @@ export const constellationCache = pgTable('constellation_cache', {
   fetchedAt: timestamp('fetched_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
+export const webhookSubscriptions = pgTable('webhook_subscriptions', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  name: varchar('name', { length: 255 }).notNull().unique(),
+  url: text('url').notNull(),
+  secret: varchar('secret', { length: 64 }).notNull(),
+  collections: jsonb('collections').notNull().default([]).$type<string[]>(),
+  actions: jsonb('actions').notNull().default([]).$type<string[]>(),
+  recordMatchers: jsonb('record_matchers').notNull().default({}).$type<Record<string, string>>(),
+  includeRecord: boolean('include_record').notNull().default(true),
+  maxEvents: integer('max_events').notNull().default(200),
+  maxWaitMs: integer('max_wait_ms').notNull().default(5000),
+  cursor: bigint('cursor', { mode: 'number' }).notNull().default(0),
+  status: varchar('status', { length: 20 }).notNull().default('active'),
+  failureCount: integer('failure_count').notNull().default(0),
+  nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).notNull().defaultNow(),
+  lastDeliveryAt: timestamp('last_delivery_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export type WebhookSubscription = typeof webhookSubscriptions.$inferSelect
+
 export const apiTokens = pgTable('api_tokens', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
   name: varchar('name', { length: 255 }).notNull(),

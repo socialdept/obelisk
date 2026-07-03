@@ -10,6 +10,7 @@ import { linksRoutes } from './routes/links'
 import { recordsRoutes } from './routes/records'
 import { searchRoutes } from './routes/search'
 import { typesRoutes } from './routes/types'
+import { webhooksRoutes } from './routes/webhooks'
 
 export interface ApiDeps {
   db: Db
@@ -38,6 +39,7 @@ export function createApp({ db, config, ollama, constellation, lexicons, devMode
   v1.route('/search', searchRoutes(db, ollama))
   v1.route('/types', typesRoutes(db, lexicons ?? new LexiconRegistry(db)))
   v1.route('/events', eventsRoutes(db))
+  v1.route('/webhooks', webhooksRoutes(db))
 
   app.route('/api/v1', v1)
   return app
