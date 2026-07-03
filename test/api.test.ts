@@ -201,3 +201,16 @@ describe('record.<path> JSON filters', () => {
     expect(body.results[0]!.rkey).toBe('op-2')
   })
 })
+
+describe('dev mode', () => {
+  test('devMode app serves without any token', async () => {
+    const devApp = createApp({ db, config: testConfig, ollama: fakeOllama, devMode: true })
+    const res = await devApp.request('/api/v1/records')
+    expect(res.status).toBe(200)
+  })
+
+  test('default app still requires auth', async () => {
+    const res = await app.request('/api/v1/records')
+    expect(res.status).toBe(401)
+  })
+})

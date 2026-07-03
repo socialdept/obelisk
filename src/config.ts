@@ -23,6 +23,7 @@ export interface Env {
   tabWsUrl: string
   ollamaUrl: string
   port: number
+  devMode: boolean
 }
 
 export function loadEnv(): Env {
@@ -34,6 +35,7 @@ export function loadEnv(): Env {
     tabWsUrl: process.env.TAB_WS_URL ?? 'ws://localhost:2480',
     ollamaUrl: process.env.OLLAMA_URL ?? 'http://127.0.0.1:11434',
     port: Number(process.env.PORT ?? 3000),
+    devMode: process.env.RESERVOIR_DEV_MODE === 'true',
   }
 }
 
