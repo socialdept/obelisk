@@ -140,6 +140,20 @@ export const constellationCache = pgTable('constellation_cache', {
   fetchedAt: timestamp('fetched_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
+export const audiences = pgTable('audiences', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  name: varchar('name', { length: 255 }).notNull().unique(),
+  definition: jsonb('definition').notNull().$type<AudienceDefinition>(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export type AudienceDefinition =
+  | { kind: 'backlink'; target: string; collection?: string; path?: string }
+  | { kind: 'collection'; collection: string; matchers?: Record<string, string> }
+  | { kind: 'static'; dids: string[] }
+
+export type AudienceRow = typeof audiences.$inferSelect
+
 export const webhookSubscriptions = pgTable('webhook_subscriptions', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
   name: varchar('name', { length: 255 }).notNull().unique(),
@@ -152,6 +166,7 @@ export const webhookSubscriptions = pgTable('webhook_subscriptions', {
   maxEvents: integer('max_events').notNull().default(200),
   maxWaitMs: integer('max_wait_ms').notNull().default(5000),
   cursor: bigint('cursor', { mode: 'number' }).notNull().default(0),
+  audience: varchar('audience', { length: 255 }),
   status: varchar('status', { length: 20 }).notNull().default('active'),
   failureCount: integer('failure_count').notNull().default(0),
   nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).notNull().defaultNow(),

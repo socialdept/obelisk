@@ -1,5 +1,6 @@
 import { createHmac } from 'node:crypto'
 import { and, asc, eq, gt, inArray, lte, sql, type SQL } from 'drizzle-orm'
+import { audienceFilter, findAudience } from '../audiences/definition'
 import type { Db } from '../db/client'
 import { events, records, webhookSubscriptions, type WebhookSubscription } from '../db/schema'
 import { jsonMatcherFilters } from '../api/routes/records'
@@ -95,6 +96,16 @@ export class WebhookWorker {
     if (sub.collections.length > 0) filters.push(inArray(events.collection, sub.collections))
     if (sub.actions.length > 0) filters.push(inArray(events.action, sub.actions))
     filters.push(...jsonMatcherFilters(sub.recordMatchers))
+
+    if (sub.audience) {
+      const audience = await findAudience(this.db, sub.audience)
+      // Unknown audience = deliver nothing rather than everything.
+      if (!audience) {
+        console.error(`webhook worker: subscription "${sub.name}" references unknown audience "${sub.audience}"`)
+        return []
+      }
+      filters.push(audienceFilter(sql`${events.did}`, audience.definition))
+    }
 
     const rows = await this.db
       .select({ event: events, record: records })

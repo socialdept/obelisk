@@ -69,6 +69,7 @@ Useful flags: `include_deleted=1` (see soft-deleted records), `cursor` (paginati
 | `GET /api/v1/types/:nsid` | Usage + resolved lexicon schema + derived text fields + observed union members |
 | `GET /api/v1/events` | Cursor-paged change log — poll it to react to new/updated/deleted records |
 | `/api/v1/webhooks` CRUD | Batched push subscriptions over the event log (HMAC-signed) |
+| `/api/v1/audiences` CRUD | Query-defined DID sets; `/:name/members` lists, `/:name/members/:did` checks |
 
 ### Filtering by record content
 
@@ -101,6 +102,21 @@ curl -X POST … "localhost:3000/api/v1/webhooks" -d '{
 ```
 
 Verify with `hash_equals('sha256='.hash_hmac('sha256', $body, $secret), $sigHeader)`. Delivery is at-least-once with per-subscription cursor: failures back off exponentially and never advance the cursor, `PATCH {"cursor": N}` rewinds for replay, `POST /webhooks/:id/test` sends a synthetic signed event.
+
+### Audiences
+
+An audience is a **query over the archive**, not a list you maintain — membership updates itself as the network changes (someone deleting their subscription record drops out automatically). Use `audience=<name>` on `GET /events` or in a webhook subscription to scope delivery to member DIDs.
+
+```bash
+# everyone subscribed to your publication — zero bookkeeping, ever
+curl -X POST … "localhost:3000/api/v1/audiences" -d '{
+  "name": "my-subscribers",
+  "definition": { "kind": "backlink", "target": "at://did:plc:…/site.standard.publication/self",
+                  "collection": "site.standard.graph.subscription", "path": "publication" }
+}'
+```
+
+Definition kinds: `backlink` (DIDs with records linking to a target), `collection` (DIDs with records in a collection, optionally matching `record.<path>` values), `static` (explicit DID list, escape hatch). Introspect via `GET /audiences/:name/members` and `GET /audiences/:name/members/:did`.
 
 ### Dev mode
 
