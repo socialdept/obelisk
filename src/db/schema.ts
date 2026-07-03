@@ -150,6 +150,7 @@ export const audiences = pgTable('audiences', {
 
 export type AudienceDefinition =
   | { kind: 'backlink'; target: string; collection?: string; path?: string }
+  | { kind: 'outlink'; did: string; collection?: string; path?: string }
   | { kind: 'collection'; collection: string; matchers?: Record<string, string> }
   | { kind: 'static'; dids: string[] }
 
@@ -168,6 +169,7 @@ export const webhookSubscriptions = pgTable('webhook_subscriptions', {
   maxWaitMs: integer('max_wait_ms').notNull().default(5000),
   cursor: bigint('cursor', { mode: 'number' }).notNull().default(0),
   audience: varchar('audience', { length: 255 }),
+  feed: varchar('feed', { length: 500 }),
   status: varchar('status', { length: 20 }).notNull().default('active'),
   failureCount: integer('failure_count').notNull().default(0),
   nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).notNull().defaultNow(),

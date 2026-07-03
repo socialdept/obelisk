@@ -37,6 +37,7 @@ export const testConfig: ReservoirConfig = {
   },
   ollama: { model: 'nomic-embed-text', dimensions: 768, chunkChars: 1800, chunkOverlap: 200 },
   constellation: { baseUrl: 'https://constellation.example', ttlSeconds: 3600, userAgent: 'reservoir-test' },
+  feeds: { following: { collection: 'site.standard.graph.subscription', path: 'publication' } },
 }
 
 let tidCounter = 0

@@ -39,7 +39,7 @@ export function createApp({ db, config, ollama, constellation, lexicons, devMode
   v1.route('/records', recordsRoutes(db))
   v1.route('/search', searchRoutes(db, ollama))
   v1.route('/types', typesRoutes(db, lexicons ?? new LexiconRegistry(db)))
-  v1.route('/events', eventsRoutes(db))
+  v1.route('/events', eventsRoutes(db, config))
   v1.route('/webhooks', webhooksRoutes(db))
   v1.route('/audiences', audiencesRoutes(db))
 

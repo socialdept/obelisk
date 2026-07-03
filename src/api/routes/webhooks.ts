@@ -11,6 +11,7 @@ interface SubscriptionInput {
   actions?: string[]
   record_matchers?: Record<string, string>
   audience?: string | null
+  feed?: string | null
   include_record?: boolean
   max_events?: number
   max_wait_ms?: number
@@ -44,6 +45,7 @@ export function webhooksRoutes(db: Db, fetchFn: FetchFn = fetch): Hono {
         actions: input.actions ?? [],
         recordMatchers: input.record_matchers ?? {},
         audience: input.audience ?? null,
+        feed: input.feed ?? null,
         includeRecord: input.include_record ?? true,
         maxEvents: input.max_events ?? 200,
         maxWaitMs: input.max_wait_ms ?? 5000,
@@ -74,6 +76,7 @@ export function webhooksRoutes(db: Db, fetchFn: FetchFn = fetch): Hono {
     if (input.actions !== undefined) updates.actions = input.actions
     if (input.record_matchers !== undefined) updates.recordMatchers = input.record_matchers
     if (input.audience !== undefined) updates.audience = input.audience
+    if (input.feed !== undefined) updates.feed = input.feed
     if (input.include_record !== undefined) updates.includeRecord = input.include_record
     if (input.max_events !== undefined) updates.maxEvents = input.max_events
     if (input.max_wait_ms !== undefined) updates.maxWaitMs = input.max_wait_ms
@@ -161,6 +164,7 @@ function serialize(sub: WebhookSubscription) {
     actions: sub.actions,
     recordMatchers: sub.recordMatchers,
     audience: sub.audience,
+    feed: sub.feed,
     includeRecord: sub.includeRecord,
     maxEvents: sub.maxEvents,
     maxWaitMs: sub.maxWaitMs,

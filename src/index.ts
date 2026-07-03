@@ -19,10 +19,18 @@ const ollama = new OllamaClient(env.ollamaUrl, config.ollama.model)
 const lexicons = new LexiconRegistry(db)
 const ingester = new Ingester(db, config)
 const embedWorker = new EmbedWorker(db, config, ollama, { textKeys: createTextKeysResolver(lexicons) })
-const webhookWorker = new WebhookWorker(db)
+const webhookWorker = new WebhookWorker(db, config)
 
 const shutdown = async () => {
   console.log('shutting down…')
+  // Hard deadline: a deep embed/ingest backlog must not hold the process
+  // (and the port) hostage — anything unfinished redelivers or re-claims.
+  setTimeout(() => {
+    console.error('shutdown deadline exceeded, exiting')
+    process.exit(1)
+  }, 10_000)
+
+  server.stop()
   await ingester.stop()
   await embedWorker.stop()
   await webhookWorker.stop()
@@ -37,7 +45,7 @@ ingester.start(env.tabWsUrl)
 embedWorker.start()
 webhookWorker.start()
 
-const app = createApp({ db, config, ollama, devMode: env.devMode })
-Bun.serve({ port: env.port, fetch: app.fetch })
+const app = createApp({ db, config, ollama, lexicons, devMode: env.devMode })
+const server = Bun.serve({ port: env.port, fetch: app.fetch, idleTimeout: 60 })
 
 console.log(`reservoir: ingesting + embedding, api on :${env.port}`)

@@ -1,13 +1,15 @@
 import { Hono } from 'hono'
 import { and, asc, eq, gt, sql, type SQL } from 'drizzle-orm'
 import { audienceFilter, findAudience } from '../../audiences/definition'
+import type { ReservoirConfig } from '../../config'
 import type { Db } from '../../db/client'
 import { events, records } from '../../db/schema'
+import { buildFeedFilter, linkFilters } from '../../feeds/filter'
 import { recordJsonFilters } from './records'
 
 const MAX_LIMIT = 500
 
-export function eventsRoutes(db: Db): Hono {
+export function eventsRoutes(db: Db, config: ReservoirConfig): Hono {
   const app = new Hono()
 
   app.get('/', async (c) => {
@@ -29,6 +31,14 @@ export function eventsRoutes(db: Db): Hono {
       const audience = await findAudience(db, query.audience)
       if (!audience) return c.json({ error: `unknown audience: ${query.audience}` }, 400)
       filters.push(audienceFilter(sql`${events.did}`, audience.definition))
+    }
+
+    filters.push(...linkFilters(query, sql`${events.recordId}`))
+
+    if (query.feed) {
+      const parsed = await buildFeedFilter(db, query.feed, config, sql`${events.recordId}`)
+      if ('error' in parsed) return c.json({ error: parsed.error }, 400)
+      filters.push(parsed.filter)
     }
 
     const includeRecord = query.include_record === '1'

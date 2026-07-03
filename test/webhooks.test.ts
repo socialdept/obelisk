@@ -78,7 +78,7 @@ describe('WebhookWorker delivery', () => {
     await applyEvent(db, testConfig, makeEvent({ rkey: 'w2' }))
     const id = await createSub()
 
-    const worker = new WebhookWorker(db, fakeFetch)
+    const worker = new WebhookWorker(db, testConfig, fakeFetch)
     expect(await worker.tick()).toBe(1)
 
     expect(deliveries).toHaveLength(1)
@@ -105,7 +105,7 @@ describe('WebhookWorker delivery', () => {
       recordMatchers: { 'content.$type': 'app.offprint.content' },
     })
 
-    await new WebhookWorker(db, fakeFetch).tick()
+    await new WebhookWorker(db, testConfig, fakeFetch).tick()
 
     expect(deliveries).toHaveLength(1)
     expect(deliveries[0]!.body.events).toHaveLength(1)
@@ -121,7 +121,7 @@ describe('WebhookWorker delivery', () => {
       .set({ lastDeliveryAt: new Date() })
       .where(eq(webhookSubscriptions.id, id))
 
-    const worker = new WebhookWorker(db, fakeFetch)
+    const worker = new WebhookWorker(db, testConfig, fakeFetch)
     expect(await worker.tick()).toBe(0)
     expect(deliveries).toHaveLength(0)
 
@@ -138,7 +138,7 @@ describe('WebhookWorker delivery', () => {
     const id = await createSub()
     respondWith = () => new Response('boom', { status: 500 })
 
-    const worker = new WebhookWorker(db, fakeFetch)
+    const worker = new WebhookWorker(db, testConfig, fakeFetch)
     await worker.tick()
 
     let sub = (await db.select().from(webhookSubscriptions).where(eq(webhookSubscriptions.id, id)))[0]!
@@ -163,7 +163,7 @@ describe('WebhookWorker delivery', () => {
     await applyEvent(db, testConfig, makeEvent({ rkey: 'p1' }))
     await createSub({ status: 'paused' })
 
-    expect(await new WebhookWorker(db, fakeFetch).tick()).toBe(0)
+    expect(await new WebhookWorker(db, testConfig, fakeFetch).tick()).toBe(0)
     expect(deliveries).toHaveLength(0)
   })
 })

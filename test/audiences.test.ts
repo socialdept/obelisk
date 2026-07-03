@@ -155,7 +155,7 @@ describe('audience consumption', () => {
       cursor: 0,
       maxWaitMs: 0,
     })
-    await new WebhookWorker(db, fakeFetch).tick()
+    await new WebhookWorker(db, testConfig, fakeFetch).tick()
 
     expect(deliveries).toHaveLength(1)
     const dids = deliveries[0]!.events.map((e) => e.did)
@@ -174,7 +174,7 @@ describe('audience consumption', () => {
       maxWaitMs: 0,
     })
 
-    expect(await new WebhookWorker(db, fakeFetch).tick()).toBe(0)
+    expect(await new WebhookWorker(db, testConfig, fakeFetch).tick()).toBe(0)
   })
 })
 

@@ -13,6 +13,8 @@ export function validateDefinition(definition: AudienceDefinition): string | nul
   switch (definition.kind) {
     case 'backlink':
       return definition.target ? null : 'backlink audiences require a target'
+    case 'outlink':
+      return definition.did ? null : 'outlink audiences require a did'
     case 'collection':
       return definition.collection ? null : 'collection audiences require a collection'
     case 'static':
@@ -31,6 +33,16 @@ export function memberDidsQuery(definition: AudienceDefinition): SQL {
         JOIN records r ON r.id = l.record_id
         WHERE l.target_uri = ${definition.target}
           AND r.deleted_at IS NULL
+          ${definition.collection ? sql`AND r.collection = ${definition.collection}` : sql``}
+          ${definition.path ? sql`AND l.path = ${definition.path}` : sql``}
+      `
+    case 'outlink':
+      return sql`
+        SELECT DISTINCT l.target_did AS did FROM record_links l
+        JOIN records r ON r.id = l.record_id
+        WHERE r.did = ${definition.did}
+          AND r.deleted_at IS NULL
+          AND l.target_did IS NOT NULL
           ${definition.collection ? sql`AND r.collection = ${definition.collection}` : sql``}
           ${definition.path ? sql`AND l.path = ${definition.path}` : sql``}
       `

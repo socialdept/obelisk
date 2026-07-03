@@ -116,7 +116,21 @@ curl -X POST … "localhost:3000/api/v1/audiences" -d '{
 }'
 ```
 
-Definition kinds: `backlink` (DIDs with records linking to a target), `collection` (DIDs with records in a collection, optionally matching `record.<path>` values), `static` (explicit DID list, escape hatch). Introspect via `GET /audiences/:name/members` and `GET /audiences/:name/members/:did`.
+Definition kinds: `backlink` (DIDs with records linking to a target), `outlink` (DIDs a user's records link to — e.g. everyone X follows), `collection` (DIDs with records in a collection, optionally matching `record.<path>` values), `static` (explicit DID list, escape hatch). Introspect via `GET /audiences/:name/members` and `GET /audiences/:name/members/:did`.
+
+### Feeds
+
+Link-based filters on `GET /events` (and webhook subscriptions via the `feed` field):
+
+```bash
+# personalized following feed: docs from every publication this user subscribes to
+curl … "localhost:3000/api/v1/events?feed=following:did:plc:xyz&collection=site.standard.document"
+
+# records linking to an exact target at a path
+curl … "localhost:3000/api/v1/events?link.site=at://did:plc:…/site.standard.publication/self"
+```
+
+Following semantics (which collection/link path expresses "following") are configurable in `reservoir.config.ts` under `feeds.following` — not hardcoded to Standard.site.
 
 ### Dev mode
 

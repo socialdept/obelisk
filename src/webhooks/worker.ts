@@ -1,8 +1,10 @@
 import { createHmac } from 'node:crypto'
 import { and, asc, eq, gt, inArray, lte, sql, type SQL } from 'drizzle-orm'
 import { audienceFilter, findAudience } from '../audiences/definition'
+import type { ReservoirConfig } from '../config'
 import type { Db } from '../db/client'
 import { events, records, webhookSubscriptions, type WebhookSubscription } from '../db/schema'
+import { buildFeedFilter } from '../feeds/filter'
 import { jsonMatcherFilters } from '../api/routes/records'
 
 const MAX_BACKOFF_MS = 300_000
@@ -27,6 +29,7 @@ export class WebhookWorker {
 
   constructor(
     private readonly db: Db,
+    private readonly config: ReservoirConfig,
     private readonly fetchFn: FetchFn = fetch,
     private readonly idleMs = 1000,
   ) {}
@@ -105,6 +108,16 @@ export class WebhookWorker {
         return []
       }
       filters.push(audienceFilter(sql`${events.did}`, audience.definition))
+    }
+
+    if (sub.feed) {
+      const parsed = await buildFeedFilter(this.db, sub.feed, this.config, sql`${events.recordId}`)
+      // Malformed feed = deliver nothing rather than everything.
+      if ('error' in parsed) {
+        console.error(`webhook worker: subscription "${sub.name}" has invalid feed "${sub.feed}": ${parsed.error}`)
+        return []
+      }
+      filters.push(parsed.filter)
     }
 
     const rows = await this.db

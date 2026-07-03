@@ -22,4 +22,10 @@ export default {
     ttlSeconds: 3600,
     userAgent: 'reservoir (miguel)',
   },
+  feeds: {
+    following: {
+      collection: 'site.standard.graph.subscription',
+      path: 'publication',
+    },
+  },
 } satisfies ReservoirConfig

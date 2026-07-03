@@ -16,6 +16,13 @@ export interface ReservoirConfig {
     ttlSeconds: number
     userAgent: string
   }
+  /** Semantics for feed=following:<did> — which records express "following" and via which link path. */
+  feeds: {
+    following: {
+      collection: string
+      path: string
+    }
+  }
 }
 
 export interface Env {
