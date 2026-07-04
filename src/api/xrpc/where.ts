@@ -25,6 +25,7 @@ const SYSTEM_FIELDS: Record<string, SQL> = {
   uri: sql`${records.uri}`,
   cid: sql`${records.cid}`,
   rev: sql`${records.rev}`,
+  lang: sql`${records.lang}`,
   indexedAt: sql`${records.indexedAt}::text`,
 }
 

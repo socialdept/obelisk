@@ -36,6 +36,8 @@ export const records = pgTable(
     searchable: tsvector('searchable').generatedAlwaysAs(
       sql`setweight(to_tsvector('english', coalesce(record->>'title', record->>'name', '')), 'A') || setweight(to_tsvector('english', coalesce(record->>'description', '')), 'B') || setweight(to_tsvector('english', coalesce(record->>'textContent', '')), 'C')`,
     ),
+    // Detected content language (ISO code); drives the FTS config per row (LAB-43).
+    lang: varchar('lang', { length: 20 }),
     embedStatus: varchar('embed_status', { length: 20 }).notNull().default('skipped'),
     embedAttempts: integer('embed_attempts').notNull().default(0),
     extractedTitle: text('extracted_title'),

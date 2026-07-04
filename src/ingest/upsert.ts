@@ -3,6 +3,7 @@ import type { ObeliskConfig } from '../config'
 import type { Db } from '../db/client'
 import { events, recordLinks, recordTypes, records } from '../db/schema'
 import { applyInteractionDeltas, contribution, readContribution, trackedPaths } from '../ranking/interactions'
+import { detectLanguage } from './lang'
 import { extractLinks } from './links'
 import { extractTypes } from './types'
 
@@ -113,6 +114,7 @@ async function applyWrite(
     cid: event.cid,
     rev: event.rev,
     record: event.record ?? {},
+    lang: detectLanguage(event.record),
     deletedAt: null,
     indexedAt: new Date(),
     ...(contentChanged && { embedStatus: 'pending', embedAttempts: 0 }),

@@ -91,7 +91,7 @@ curl -X POST "localhost:6060/xrpc/site.standard.document.searchRecords" -d '{"q"
 curl -X POST "localhost:6060/xrpc/site.standard.document.searchRecords" -d '{"q": "atproto", "ranking": "relevant-fresh"}'
 ```
 
-`where` supports record fields (dot paths like `content.$type`, resolved against the record body — **not** prefixed with `value`), system fields (`did`, `collection`, `rkey`, `uri`, `cid`, `rev`, `indexedAt`), and the special `json` field (whole-record search). System fields win on a name clash; prefix with `record.` (e.g. `record.did`) to force a JSON-path lookup and reach a record whose own body carries a `did`/`uri`/… key. Responses use atproto conventions (`{uri, cid, did, collection, value, indexedAt}`, `{error, message}` errors). Write verbs return `MethodNotImplemented` — Obelisk is a read-only archive.
+`where` supports record fields (dot paths like `content.$type`, resolved against the record body — **not** prefixed with `value`), system fields (`did`, `collection`, `rkey`, `uri`, `cid`, `rev`, `lang`, `indexedAt`), and the special `json` field (whole-record search). System fields win on a name clash; prefix with `record.` (e.g. `record.did`) to force a JSON-path lookup and reach a record whose own body carries a `did`/`uri`/… key. Responses use atproto conventions (`{uri, cid, did, collection, value, indexedAt}`, `{error, message}` errors). Write verbs return `MethodNotImplemented` — Obelisk is a read-only archive.
 
 #### Ranking profiles (LAB-37)
 
@@ -102,6 +102,8 @@ curl -X POST "localhost:6060/xrpc/site.standard.document.searchRecords" -d '{"q"
 - `recency` — `exp` half-life decay over `indexedAt` or a `record.<path>` timestamp.
 
 Results carry a per-row `score` and a compound `(score, id)` cursor that carries its own `now` anchor, so ranked pagination stays stable as the clock (and later, counts) move. Unknown profile → `InvalidRequest`. Ranking, like everything else, is **config, not code** — no lexicon baked in.
+
+FTS is **per-language** (LAB-43): each record's content language is detected on ingest (from its own `langs`/`lang` field) and stored as `lang`, and the `searchable` index tokenizes with that language's Postgres config — falling back to `english` when unset (existing behavior) and `simple` (unstemmed) for a detected-but-unsupported language, so non-English text is never mis-stemmed. `lang` is a filterable/facetable system field.
 
 `searchRecords` also takes `highlight: true` — each result gains a `ts_headline` `highlight` excerpt with `<mark>`-wrapped matches — and `facets: ["collection", "did", …]` — group counts over the same keyword predicate + filters, returned as `{facets: {field: [{value, count}]}}` alongside `records` (one round-trip for a results list + filter sidebar; facet fields resolve through the same `where` DSL). Both work across modes.
 
