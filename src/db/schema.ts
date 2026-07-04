@@ -8,6 +8,7 @@ import {
   integer,
   jsonb,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -129,6 +130,17 @@ export const events = pgTable(
     index('events_collection_id_idx').on(table.collection, table.id),
     index('events_did_id_idx').on(table.did, table.id),
   ],
+)
+
+export const interactionCounts = pgTable(
+  'interaction_counts',
+  {
+    targetUri: text('target_uri').notNull(),
+    // "<source_collection>:<path>" — e.g. "app.bsky.feed.like:subject.uri".
+    kind: varchar('kind', { length: 511 }).notNull(),
+    count: bigint('count', { mode: 'number' }).notNull().default(0),
+  },
+  (table) => [primaryKey({ columns: [table.targetUri, table.kind] })],
 )
 
 export const constellationCache = pgTable('constellation_cache', {

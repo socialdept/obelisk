@@ -24,7 +24,9 @@ export async function setupTestDb(): Promise<{ db: Db; teardown: () => Promise<v
 export async function truncateAll(db: Db): Promise<void> {
   const { sql } = await import('drizzle-orm')
   await db.execute(
-    sql.raw('TRUNCATE records, record_embeddings, record_links, constellation_cache, api_tokens RESTART IDENTITY CASCADE'),
+    sql.raw(
+      'TRUNCATE records, record_embeddings, record_links, interaction_counts, constellation_cache, api_tokens RESTART IDENTITY CASCADE',
+    ),
   )
 }
 

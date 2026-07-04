@@ -2,6 +2,7 @@ import { and, eq } from 'drizzle-orm'
 import type { ObeliskConfig } from '../config'
 import type { Db } from '../db/client'
 import { events, recordLinks, recordTypes, records } from '../db/schema'
+import { applyInteractionDeltas, contribution, readContribution, trackedPaths } from '../ranking/interactions'
 import { extractLinks } from './links'
 import { extractTypes } from './types'
 
@@ -35,7 +36,7 @@ export async function applyEvent(
   if (event.type !== 'record') return 'skipped'
 
   const existing = await tx
-    .select({ id: records.id, rev: records.rev, cid: records.cid })
+    .select({ id: records.id, rev: records.rev, cid: records.cid, deletedAt: records.deletedAt })
     .from(records)
     .where(
       and(
@@ -49,9 +50,27 @@ export async function applyEvent(
 
   if (existing && existing.rev && event.rev && event.rev <= existing.rev) return 'skipped'
 
-  if (event.action === 'delete') return applyDelete(tx, event, existing?.id)
+  // Interaction rollup (LAB-39): capture the record's OLD contribution before the
+  // links are replaced. Only for collections that appear in a ranking spec.
+  const paths = trackedPaths(config, event.collection)
+  const oldContribution =
+    paths.size > 0 && existing && existing.deletedAt === null
+      ? await readContribution(tx, existing.id, event.collection, paths)
+      : []
 
-  return applyWrite(tx, config, event, existing)
+  const result =
+    event.action === 'delete'
+      ? await applyDelete(tx, event, existing?.id)
+      : await applyWrite(tx, config, event, existing)
+
+  if (paths.size > 0) {
+    // A deleted record contributes nothing; a written one contributes its links.
+    const newContribution =
+      event.action === 'delete' ? [] : contribution(event.collection, extractLinks(event.record ?? {}), paths)
+    await applyInteractionDeltas(tx, oldContribution, newContribution)
+  }
+
+  return result
 }
 
 async function applyDelete(tx: Tx, event: RecordEvent, existingId?: number): Promise<UpsertResult> {

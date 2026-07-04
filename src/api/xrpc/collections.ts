@@ -18,6 +18,7 @@ import {
   rankingCursorFilter,
   type RankingCursor,
 } from '../../ranking/compile'
+import { localInteractionCount } from '../../ranking/interactions'
 
 const NSID_RE = /^[a-z][a-z0-9-]*(\.[a-z0-9-]+)+\.[a-zA-Z][a-zA-Z0-9]*$/
 const MAX_LIMIT = 100
@@ -242,7 +243,12 @@ async function rankedSearch(
   const anchor = sql`${new Date(anchorMs).toISOString()}::timestamptz`
 
   const relevance = sql`ts_rank(searchable, websearch_to_tsquery('english', ${body.q!}))`
-  const compiled = compileRanking(profile, { relevance, idColumn: sql`records.id`, now: anchor })
+  const compiled = compileRanking(profile, {
+    relevance,
+    idColumn: sql`records.id`,
+    now: anchor,
+    interactionCount: localInteractionCount,
+  })
 
   const cursorClause = prev
     ? rankingCursorFilter(compiled.score, sql`records.id`, prev.score, prev.id)

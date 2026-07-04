@@ -96,7 +96,7 @@ curl -X POST "localhost:6060/xrpc/site.standard.document.searchRecords" -d '{"q"
 `searchRecords` accepts a `ranking: "<profile>"` to order by a configured score instead of raw relevance. A profile (in `obelisk.config.ts` under `rankings`) is a **linear weighted sum** of signals — `score = Σ weightᵢ · transformᵢ(signalᵢ)`:
 
 - `relevance` — the FTS/vector match quality (contributes **0** when there's no `q`, so the same profile ranks a search box and a chrono-less feed);
-- `interactions` — inbound-link popularity per a config `{collection, path, weight}` link spec (currently **stubbed to 0** until the rollup lands, LAB-39/40);
+- `interactions` — inbound-link popularity per a config `{collection, path, weight}` link spec, read from the `interaction_counts` rollup (maintained live off the ingest path, scoped to the specs your profiles reference; counts only non-deleted sources). Rebuild/repair with `bun run scripts/rebuild-interactions.ts`. Local counts today; local-vs-Constellation source resolution is LAB-40;
 - `recency` — `exp` half-life decay over `indexedAt` or a `record.<path>` timestamp.
 
 Results carry a per-row `score` and a compound `(score, id)` cursor that carries its own `now` anchor, so ranked pagination stays stable as the clock (and later, counts) move. Unknown profile → `InvalidRequest`. `semantic` + `ranking` together are not supported yet (LAB-41). Ranking, like everything else, is **config, not code** — no lexicon baked in.
