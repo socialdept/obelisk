@@ -37,18 +37,68 @@ export function whereFilters(where: WhereClause): SQL[] | { error: string } {
       return { error: `filter for "${field}" must be an object with eq/contains/in` }
     }
 
-    const column = columnFor(field)
     const ops = Object.entries(condition)
     if (ops.length === 0) return { error: `filter for "${field}" has no operator` }
 
+    // JSON paths get containment (@>) for eq/in — one GIN index serves them all.
+    // System fields (and the whole-record `json` text field) stay column ops.
+    const parts = jsonParts(field)
     for (const [op, value] of ops) {
-      const filter = operatorFilter(field, column, op, value)
+      const filter = parts
+        ? jsonOperator(field, parts, op, value)
+        : columnOperator(field, columnFor(field), op, value)
       if ('error' in filter) return filter
       filters.push(filter.sql)
     }
   }
 
   return filters
+}
+
+/** The record JSON path a field addresses, or null for a system column / `json` text. */
+function jsonParts(field: string): string[] | null {
+  if (field === 'json') return null
+  if (field.startsWith('record.')) return field.slice('record.'.length).split('.')
+  if (SYSTEM_FIELDS[field]) return null
+  return field.split('.')
+}
+
+/**
+ * `record @> '{path: value}'::jsonb`. Indexable via the GIN index. To match
+ * membership in an array-valued field, pass an array value — `tags: { eq: ["x"] }`
+ * hits `tags: ["x", "y"]` (array-subset containment). A scalar value only matches
+ * a scalar field (Postgres's array-contains-scalar shortcut is top-level only).
+ */
+export function containment(parts: string[], value: unknown): SQL {
+  const object = parts.reduceRight<unknown>((acc, key) => ({ [key]: acc }), value)
+  return sql`${records.record} @> ${JSON.stringify(object)}::jsonb`
+}
+
+function jsonOperator(
+  field: string,
+  parts: string[],
+  op: string,
+  value: unknown,
+): { sql: SQL } | { error: string } {
+  switch (op) {
+    case 'eq':
+      if (value === undefined) return { error: `"eq" for "${field}" requires a value` }
+      return { sql: containment(parts, value) }
+    case 'in': {
+      if (!Array.isArray(value) || value.length === 0) {
+        return { error: `"in" for "${field}" requires a non-empty array` }
+      }
+      const clauses = value.map((item) => containment(parts, item))
+      return { sql: sql`(${sql.join(clauses, sql` OR `)})` }
+    }
+    case 'contains': {
+      // Substring match can't use containment/GIN — fall back to extract-text ILIKE.
+      if (typeof value !== 'string') return { error: `"contains" for "${field}" requires a string` }
+      return { sql: sql`${jsonPath(parts.join('.'))} ILIKE ${'%' + escapeLike(value) + '%'}` }
+    }
+    default:
+      return { error: `unknown operator "${op}" for "${field}" (supported: eq, contains, in)` }
+  }
 }
 
 export function columnFor(field: string): SQL {
@@ -70,7 +120,8 @@ export function jsonPath(path: string): SQL {
   return sql`jsonb_extract_path_text(${records.record}, ${args})`
 }
 
-function operatorFilter(
+/** Operators over a real column (system field) or the whole-record `json` text. */
+function columnOperator(
   field: string,
   column: SQL,
   op: string,

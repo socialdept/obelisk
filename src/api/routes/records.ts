@@ -1,15 +1,15 @@
-import { eq, isNull, sql, type SQL } from 'drizzle-orm'
+import { eq, isNull, type SQL } from 'drizzle-orm'
 import { records } from '../../db/schema'
+import { containment } from '../xrpc/where'
 
 const MAX_LIMIT = 100
 
-/** Equality filters against record JSON, e.g. { "content.$type": "app.offprint.content" }. */
+/**
+ * Equality filters against record JSON, e.g. { "content.$type": "app.offprint.content" }.
+ * Uses jsonb containment so the single GIN index serves them (LAB-11).
+ */
 export function jsonMatcherFilters(matchers: Record<string, string>): SQL[] {
-  return Object.entries(matchers).map(([path, value]) => {
-    const parts = path.split('.')
-    const args = sql.join(parts.map((part) => sql`${part}`), sql`, `)
-    return sql`jsonb_extract_path_text(${records.record}, ${args}) = ${value}`
-  })
+  return Object.entries(matchers).map(([path, value]) => containment(path.split('.'), value))
 }
 
 /** Same, sourced from `record.<path>=<value>` query params. */

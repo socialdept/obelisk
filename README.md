@@ -91,7 +91,7 @@ curl -X POST "localhost:6060/xrpc/site.standard.document.searchRecords" -d '{"q"
 curl -X POST "localhost:6060/xrpc/site.standard.document.searchRecords" -d '{"q": "atproto", "ranking": "relevant-fresh"}'
 ```
 
-`where` supports record fields (dot paths like `content.$type`, resolved against the record body — **not** prefixed with `value`), system fields (`did`, `collection`, `rkey`, `uri`, `cid`, `rev`, `lang`, `indexedAt`), and the special `json` field (whole-record search). System fields win on a name clash; prefix with `record.` (e.g. `record.did`) to force a JSON-path lookup and reach a record whose own body carries a `did`/`uri`/… key. Responses use atproto conventions (`{uri, cid, did, collection, value, indexedAt}`, `{error, message}` errors). Write verbs return `MethodNotImplemented` — Obelisk is a read-only archive.
+`where` supports record fields (dot paths like `content.$type`, resolved against the record body — **not** prefixed with `value`), system fields (`did`, `collection`, `rkey`, `uri`, `cid`, `rev`, `lang`, `indexedAt`), and the special `json` field (whole-record search). System fields win on a name clash; prefix with `record.` (e.g. `record.did`) to force a JSON-path lookup and reach a record whose own body carries a `did`/`uri`/… key. Record-path `eq`/`in` compile to jsonb **containment** (`@>`) served by a single GIN index (LAB-11), so they stay index scans at scale; pass an array value to `eq` to match array membership (`tags: {eq: ["x"]}`). `contains` (substring) stays an extract-text `ILIKE` fallback. Responses use atproto conventions (`{uri, cid, did, collection, value, indexedAt}`, `{error, message}` errors). Write verbs return `MethodNotImplemented` — Obelisk is a read-only archive.
 
 #### Ranking profiles (LAB-37)
 
