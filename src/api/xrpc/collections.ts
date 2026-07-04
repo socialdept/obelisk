@@ -19,6 +19,7 @@ import {
   type RankingCursor,
 } from '../../ranking/compile'
 import { localInteractionCount } from '../../ranking/interactions'
+import type { RankingProfile } from '../../ranking/config'
 
 const NSID_RE = /^[a-z][a-z0-9-]*(\.[a-z0-9-]+)+\.[a-zA-Z][a-zA-Z0-9]*$/
 const MAX_LIMIT = 100
@@ -31,8 +32,12 @@ interface QueryBody {
   includeDeleted?: boolean
   q?: string
   semantic?: boolean
+  mode?: 'fts' | 'semantic' | 'hybrid'
   ranking?: string
 }
+
+const RRF_K = 60
+const RETRIEVE_K = 100
 
 /**
  * atproto-shaped query surface: the METHOD NSID is the archived collection
@@ -175,14 +180,20 @@ async function searchRecords(
   if ('error' in built) return xrpcError(c, 400, 'InvalidRequest', built.error)
   const limit = clampLimit(body.limit)
 
-  if (body.ranking) {
-    if (body.semantic) {
-      return xrpcError(c, 400, 'InvalidRequest', 'semantic ranking is not supported yet (see LAB-41)')
-    }
-    return rankedSearch(c, db, config, body, built.filters, limit)
+  const mode = body.mode ?? (body.semantic ? 'semantic' : 'fts')
+  if (mode !== 'fts' && mode !== 'semantic' && mode !== 'hybrid') {
+    return xrpcError(c, 400, 'InvalidRequest', `unknown mode: ${mode} (expected fts, semantic, or hybrid)`)
   }
 
-  if (body.semantic) {
+  if (mode === 'hybrid') return hybridSearch(c, db, ollama, config, body, built.filters, limit)
+
+  if (mode === 'fts' && body.ranking) return rankedSearch(c, db, config, body, built.filters, limit)
+
+  if (mode === 'semantic' && body.ranking) {
+    return xrpcError(c, 400, 'InvalidRequest', 'semantic ranking is not supported yet — use mode "hybrid" (LAB-41)')
+  }
+
+  if (mode === 'semantic') {
     const [queryVector] = await ollama.embed([body.q])
     const vec = JSON.stringify(queryVector)
     const rows = await db.execute<RecordRowRaw & { distance: number }>(sql`
@@ -231,8 +242,90 @@ async function rankedSearch(
   const profile = config.rankings?.[body.ranking!]
   if (!profile) return xrpcError(c, 400, 'InvalidRequest', `unknown ranking profile: ${body.ranking}`)
 
-  // Decode the cursor first: it carries the `now` anchor so recency scores stay
-  // identical across pages (a live clock would drift the boundary row's score).
+  return runRanked(c, db, body, limit, {
+    profile,
+    ctes: sql``,
+    from: sql`FROM records`,
+    where: sql`searchable @@ websearch_to_tsquery('english', ${body.q!}) AND ${and(...filters)}`,
+    relevance: sql`ts_rank(searchable, websearch_to_tsquery('english', ${body.q!}))`,
+  })
+}
+
+/**
+ * Hybrid search: fuse the FTS and vector rankings with Reciprocal Rank Fusion
+ * (`Σ 1/(k + rankᵢ)`, k=60) into one relevance signal, so a doc strong in either
+ * leg surfaces without tuning the `ts_rank`-vs-distance scale mismatch. The fused
+ * relevance then feeds a ranking profile (an implicit relevance-only one when no
+ * `ranking` is given), so recency/interactions compose on top.
+ */
+async function hybridSearch(
+  c: XrpcContext,
+  db: Db,
+  ollama: OllamaClient,
+  config: ObeliskConfig,
+  body: QueryBody,
+  filters: SQL[],
+  limit: number,
+) {
+  const profile = body.ranking ? config.rankings?.[body.ranking] : RELEVANCE_ONLY
+  if (!profile) return xrpcError(c, 400, 'InvalidRequest', `unknown ranking profile: ${body.ranking}`)
+
+  const [queryVector] = await ollama.embed([body.q!])
+  const vec = JSON.stringify(queryVector)
+  const q = body.q!
+
+  // Two ranked legs → RRF-fused relevance, filters applied inside each leg.
+  const ctes = sql`WITH fts AS (
+      SELECT records.id AS id, row_number() OVER (ORDER BY ts_rank(searchable, websearch_to_tsquery('english', ${q})) DESC) AS rank
+      FROM records
+      WHERE searchable @@ websearch_to_tsquery('english', ${q}) AND ${and(...filters)}
+      ORDER BY ts_rank(searchable, websearch_to_tsquery('english', ${q})) DESC
+      LIMIT ${RETRIEVE_K}
+    ),
+    vec AS (
+      SELECT id, row_number() OVER (ORDER BY distance) AS rank FROM (
+        SELECT DISTINCT ON (nn.record_id) nn.record_id AS id, nn.distance
+        FROM (
+          SELECT record_id, embedding <=> ${vec}::vector AS distance
+          FROM record_embeddings ORDER BY embedding <=> ${vec}::vector LIMIT ${RETRIEVE_K}
+        ) nn
+        JOIN records ON records.id = nn.record_id
+        WHERE ${and(...filters)}
+        ORDER BY nn.record_id, nn.distance
+      ) d ORDER BY distance LIMIT ${RETRIEVE_K}
+    ),
+    fused AS (
+      SELECT coalesce(fts.id, vec.id) AS id,
+             coalesce(1.0 / (${RRF_K} + fts.rank), 0) + coalesce(1.0 / (${RRF_K} + vec.rank), 0) AS relevance
+      FROM fts FULL OUTER JOIN vec ON fts.id = vec.id
+    ) `
+
+  return runRanked(c, db, body, limit, {
+    profile,
+    ctes,
+    from: sql`FROM fused JOIN records ON records.id = fused.id`,
+    where: sql`TRUE`,
+    relevance: sql`fused.relevance`,
+  })
+}
+
+/** An implicit profile for hybrid search with no explicit ranking: relevance only. */
+const RELEVANCE_ONLY: RankingProfile = { signals: [{ kind: 'relevance', weight: 1 }] }
+
+interface RankedQuery {
+  profile: RankingProfile
+  ctes: SQL
+  from: SQL
+  where: SQL
+  relevance: SQL
+}
+
+/**
+ * Shared ranked-query core: compile the profile's score with the given relevance,
+ * page with the compound `(score, id)` cursor (whose `now` anchor keeps recency
+ * scores stable across pages), and serialize with the per-row score.
+ */
+async function runRanked(c: XrpcContext, db: Db, body: QueryBody, limit: number, q: RankedQuery) {
   let prev: RankingCursor | undefined
   if (body.cursor) {
     const decoded = decodeRankingCursor(body.cursor)
@@ -242,25 +335,21 @@ async function rankedSearch(
   const anchorMs = prev?.anchorMs ?? Date.now()
   const anchor = sql`${new Date(anchorMs).toISOString()}::timestamptz`
 
-  const relevance = sql`ts_rank(searchable, websearch_to_tsquery('english', ${body.q!}))`
-  const compiled = compileRanking(profile, {
-    relevance,
+  const compiled = compileRanking(q.profile, {
+    relevance: q.relevance,
     idColumn: sql`records.id`,
     now: anchor,
     interactionCount: localInteractionCount,
   })
 
-  const cursorClause = prev
-    ? rankingCursorFilter(compiled.score, sql`records.id`, prev.score, prev.id)
-    : sql`TRUE`
+  const cursorClause = prev ? rankingCursorFilter(compiled.score, sql`records.id`, prev.score, prev.id) : sql`TRUE`
 
   const rows = await db.execute<RecordRowRaw & { id: number; score: number }>(sql`
-    SELECT did, collection, rkey, uri, cid, record, indexed_at,
-           records.id AS id, (${compiled.score}) AS score
-    FROM records
-    WHERE searchable @@ websearch_to_tsquery('english', ${body.q!})
-      AND ${and(...filters)}
-      AND ${cursorClause}
+    ${q.ctes}
+    SELECT records.did, records.collection, records.rkey, records.uri, records.cid,
+           records.record, records.indexed_at, records.id AS id, (${compiled.score})::double precision AS score
+    ${q.from}
+    WHERE ${q.where} AND ${cursorClause}
     ORDER BY ${compiled.orderBy}
     LIMIT ${limit}
   `)

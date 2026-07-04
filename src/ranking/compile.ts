@@ -156,5 +156,9 @@ export function decodeRankingCursor(raw: string): RankingCursor | { error: strin
  * cursor's anchor (`now`) so `s` still matches the boundary row exactly.
  */
 export function rankingCursorFilter(score: SQL, idColumn: SQL, s: number, id: number): SQL {
-  return sql`((${score}) < ${s} OR ((${score}) = ${s} AND ${idColumn} < ${id}))`
+  // Cast to double precision so the comparison uses the same representation the
+  // ORDER BY and the encoded cursor do — otherwise a `numeric` score (e.g. RRF)
+  // rounds differently and the boundary row repeats or gets skipped.
+  const s8 = sql`(${score})::double precision`
+  return sql`(${s8} < ${s} OR (${s8} = ${s} AND ${idColumn} < ${id}))`
 }

@@ -85,6 +85,8 @@ curl -X POST "localhost:6060/xrpc/site.standard.document.getRecords" -d '{
 curl "localhost:6060/xrpc/site.standard.document.getRecord?uri=at://…"
 curl -X POST "localhost:6060/xrpc/site.standard.document.countRecords" -d '{"where": {…}}'
 curl -X POST "localhost:6060/xrpc/site.standard.document.searchRecords" -d '{"q": "atproto", "semantic": true}'
+# hybrid: RRF-fuse keyword + vector into one ranked list (mode: fts | semantic | hybrid)
+curl -X POST "localhost:6060/xrpc/site.standard.document.searchRecords" -d '{"q": "atproto", "mode": "hybrid"}'
 # keyword search ordered by a named ranking profile instead of raw ts_rank
 curl -X POST "localhost:6060/xrpc/site.standard.document.searchRecords" -d '{"q": "atproto", "ranking": "relevant-fresh"}'
 ```
@@ -99,7 +101,9 @@ curl -X POST "localhost:6060/xrpc/site.standard.document.searchRecords" -d '{"q"
 - `interactions` — inbound-link popularity per a config `{collection, path, weight}` link spec, read from the `interaction_counts` rollup (maintained live off the ingest path, scoped to the specs your profiles reference; counts only non-deleted sources). Rebuild/repair with `bun run scripts/rebuild-interactions.ts`. Where each collection's counts come from is resolved per `interactionSources` (LAB-40): **local** when we consume the collection and it's backfilled, else **Constellation** network backlinks (fetched via the cached client into the same rollup); `overrides` pin a source;
 - `recency` — `exp` half-life decay over `indexedAt` or a `record.<path>` timestamp.
 
-Results carry a per-row `score` and a compound `(score, id)` cursor that carries its own `now` anchor, so ranked pagination stays stable as the clock (and later, counts) move. Unknown profile → `InvalidRequest`. `semantic` + `ranking` together are not supported yet (LAB-41). Ranking, like everything else, is **config, not code** — no lexicon baked in.
+Results carry a per-row `score` and a compound `(score, id)` cursor that carries its own `now` anchor, so ranked pagination stays stable as the clock (and later, counts) move. Unknown profile → `InvalidRequest`. Ranking, like everything else, is **config, not code** — no lexicon baked in.
+
+`searchRecords` takes a `mode` (`fts` default / `semantic` / `hybrid`). **`hybrid`** (LAB-41) runs both the keyword and vector retrievers and fuses them with Reciprocal Rank Fusion (`Σ 1/(60 + rankᵢ)`) — rank-based, so no `ts_rank`-vs-distance scale tuning — surfacing a doc strong in *either* leg. Hybrid composes with a `ranking` profile: the fused relevance feeds the `relevance` signal, so recency/interactions layer on top (with no profile, it's relevance-only). `where`/collection filters apply to both legs. (`semantic` + `ranking` alone is still deferred — use `hybrid`.)
 
 ### Service plane — `/xrpc/social.dept.obelisk.{verb}`
 
