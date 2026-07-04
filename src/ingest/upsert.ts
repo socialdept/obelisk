@@ -33,8 +33,11 @@ export async function applyEvent(
   tx: Tx,
   config: ObeliskConfig,
   event: RecordEvent,
+  /** DIDs to never archive (LAB-47) — a blocked repo's events are dropped here. */
+  blocked?: Set<string>,
 ): Promise<UpsertResult> {
   if (event.type !== 'record') return 'skipped'
+  if (blocked?.has(event.did)) return 'skipped'
 
   const existing = await tx
     .select({ id: records.id, rev: records.rev, cid: records.cid, deletedAt: records.deletedAt })

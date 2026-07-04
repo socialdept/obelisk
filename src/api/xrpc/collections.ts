@@ -20,6 +20,7 @@ import {
 } from '../../ranking/compile'
 import { localInteractionCount } from '../../ranking/interactions'
 import type { RankingProfile } from '../../ranking/config'
+import type { Blocklist } from '../../ingest/blocklist'
 import { computeFacets, highlightExpr, type FacetBucket } from '../routes/search-enrich'
 
 const NSID_RE = /^[a-z][a-z0-9-]*(\.[a-z0-9-]+)+\.[a-zA-Z][a-zA-Z0-9]*$/
@@ -65,6 +66,8 @@ export interface XrpcDeps {
   tab: TabAdmin
   /** Injectable for testWebhook delivery; defaults to global fetch. */
   fetchFn?: FetchFn
+  /** Shared DID deny-list (LAB-47). */
+  blocklist: Blocklist
 }
 
 export function xrpcRoutes(deps: XrpcDeps): Hono {

@@ -3,6 +3,7 @@ import type { ObeliskConfig } from '../config'
 import { ConstellationClient } from '../constellation/client'
 import type { Db } from '../db/client'
 import type { OllamaClient } from '../embed/ollama'
+import { Blocklist } from '../ingest/blocklist'
 import { TabAdmin } from '../ingest/tab-admin'
 import { LexiconRegistry } from '../lexicon/registry'
 import type { FetchFn } from '../webhooks/worker'
@@ -19,6 +20,8 @@ export interface ApiDeps {
   tabAdmin?: TabAdmin
   /** Injectable for the testWebhook procedure's delivery; defaults to global fetch. */
   fetchFn?: FetchFn
+  /** Shared DID deny-list (LAB-47). Defaults to an empty in-memory list. */
+  blocklist?: Blocklist
   /** Disables API authentication entirely. Local development only. */
   devMode?: boolean
 }
@@ -31,7 +34,7 @@ export interface ApiDeps {
  *
  * Bearer-authed unless devMode.
  */
-export function createApp({ db, config, ollama, constellation, lexicons, tabAdmin, fetchFn, devMode }: ApiDeps): Hono {
+export function createApp({ db, config, ollama, constellation, lexicons, tabAdmin, fetchFn, blocklist, devMode }: ApiDeps): Hono {
   const app = new Hono()
 
   app.get('/health', (c) => c.json({ ok: true }))
@@ -39,6 +42,7 @@ export function createApp({ db, config, ollama, constellation, lexicons, tabAdmi
   const constellationClient = constellation ?? new ConstellationClient(db, config.constellation)
   const lexiconRegistry = lexicons ?? new LexiconRegistry(db)
   const tab = tabAdmin ?? new TabAdmin(undefined)
+  const denyList = blocklist ?? new Blocklist()
 
   const xrpc = new Hono()
   if (devMode) {
@@ -48,7 +52,7 @@ export function createApp({ db, config, ollama, constellation, lexicons, tabAdmi
   }
   xrpc.route(
     '/',
-    xrpcRoutes({ db, ollama, config, constellation: constellationClient, lexicons: lexiconRegistry, tab, fetchFn }),
+    xrpcRoutes({ db, ollama, config, constellation: constellationClient, lexicons: lexiconRegistry, tab, fetchFn, blocklist: denyList }),
   )
   app.route('/xrpc', xrpc)
 

@@ -132,6 +132,7 @@ Obelisk's own cross-collection / archive operations, under the owned authority `
 | `getAudiences` / `getAudience?name=` | List / fetch query-defined DID sets |
 | `getAudienceMembers?name=&limit=&offset=` / `checkAudienceMember?name=&did=` | Resolve members / test membership |
 | `getWatchedDids?active=` / `getWatchedDid?did=` | List / fetch the "who am I auditing" set |
+| `getBlockedDids` | List the DID deny-list — repos Obelisk refuses to archive |
 
 **Procedures (POST, JSON body — mutate Obelisk's own DB, never a PDS):**
 
@@ -144,6 +145,8 @@ Obelisk's own cross-collection / archive operations, under the owned authority `
 | `addWatchedDid` | `{did, note?, collections?}` | Watch a DID across *all* collections; best-effort enrolls it in the footprint Tab (`/repos/add`, backfill + forward capture). The table is the source of truth. |
 | `updateWatchedDid` | `{did, note?, collections?, active?}` | Reactivate re-enrolls; deactivate un-enrolls |
 | `removeWatchedDid` | `{did}` | Un-watch + un-enroll |
+| `addBlockedDid` | `{did, note?, purge?, force?}` | **Deny-list a repo** — its events arrive from Tab but are never archived (in-memory skip, effective immediately). `purge` soft-deletes its existing records; `purge+force` hard-deletes them (cascades). Returns `{blocked, purged, mode}`. Complements query-time `nin` (per-consumer mute) with a global archive-side block |
+| `removeBlockedDid` | `{did}` | Un-block (does not restore purged records) |
 | `backfillEvents` | `{collection?, did?, where?, includeDeleted?}` | Seed synthetic `create` (or `delete`) events for archived records that predate the event log, so a `cursor=start` consumer sees them. Idempotent (`NOT EXISTS` guard); `live:false` marks them historical. Returns `{seeded}` |
 
 ```bash
@@ -157,6 +160,7 @@ curl -H "$A" "localhost:6060/xrpc/social.dept.obelisk.aggregate?source=events&gr
 curl -X POST -H "$A" "localhost:6060/xrpc/social.dept.obelisk.aggregate" -d '{"source": "links", "groupBy": "targetCollection", "where": {"did": {"eq": "did:plc:…"}}}'
 curl -H "$A" "localhost:6060/xrpc/social.dept.obelisk.getRankedFeed?feed=following:did:plc:…&collection=site.standard.document&ranking=relevant-fresh"
 curl -X POST -H "$A" "localhost:6060/xrpc/social.dept.obelisk.addWatchedDid" -d '{"did": "did:plc:…"}'
+curl -X POST -H "$A" "localhost:6060/xrpc/social.dept.obelisk.addBlockedDid" -d '{"did": "did:plc:spammer", "purge": true}'
 ```
 
 ### Backfill progress

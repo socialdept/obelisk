@@ -212,6 +212,15 @@ export const watchedDids = pgTable(
 
 export type WatchedDidRow = typeof watchedDids.$inferSelect
 
+export const blockedDids = pgTable('blocked_dids', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  did: varchar('did', { length: 255 }).notNull().unique(),
+  note: text('note'),
+  addedAt: timestamp('added_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export type BlockedDidRow = typeof blockedDids.$inferSelect
+
 export const apiTokens = pgTable('api_tokens', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
   name: varchar('name', { length: 255 }).notNull(),

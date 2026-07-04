@@ -1,5 +1,6 @@
 import type { ObeliskConfig } from '../config'
 import type { Db } from '../db/client'
+import type { Blocklist } from './blocklist'
 import { applyEvent, type RecordEvent } from './upsert'
 
 export interface IngesterOptions {
@@ -41,6 +42,8 @@ export class Ingester {
     private readonly db: Db,
     private readonly config: ObeliskConfig,
     options: IngesterOptions = {},
+    /** Shared deny-list (LAB-47); blocked DIDs' events are skipped at apply time. */
+    private readonly blocklist?: Blocklist,
   ) {
     this.batchSize = options.batchSize ?? 200
     this.flushMs = options.flushMs ?? 500
@@ -143,8 +146,9 @@ export class Ingester {
     for (;;) {
       try {
         await this.db.transaction(async (tx) => {
+          const blocked = this.blocklist?.snapshot()
           for (const { event } of batch) {
-            const result = await applyEvent(tx, this.config, event)
+            const result = await applyEvent(tx, this.config, event, blocked)
             if (result === 'applied') this.stats.applied += 1
             else this.stats.skipped += 1
           }

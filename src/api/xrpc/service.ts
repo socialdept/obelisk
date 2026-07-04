@@ -25,6 +25,7 @@ import {
 import { runAggregate, type AggregateInput } from '../routes/aggregate'
 import { rankedFeed, type RankedFeedInput } from '../routes/feed'
 import { subscribeEvents } from '../routes/subscribe'
+import { blockDid, listBlocked, unblockDid, type Blocklist } from '../../ingest/blocklist'
 import { backfillStatus } from '../backfill'
 import { backfillEvents, queryEvents } from '../routes/events'
 import { getRecordLinks, queryBacklinks, queryNetworkBacklinks } from '../routes/links'
@@ -50,6 +51,8 @@ export interface ServiceDeps {
   tab: TabAdmin
   /** Injectable for testWebhook delivery; defaults to global fetch. */
   fetchFn?: FetchFn
+  /** Shared DID deny-list (LAB-47). */
+  blocklist: Blocklist
 }
 
 /**
@@ -112,6 +115,8 @@ export function handleServiceMethod(verb: string, c: XrpcContext, deps: ServiceD
       return getWatchedDids(c, deps)
     case 'getWatchedDid':
       return respond(c, getWatched(deps.db, c.req.query('did')))
+    case 'getBlockedDids':
+      return getBlockedDids(c, deps)
 
     // ── procedures ───────────────────────────────────────────
     case 'createWebhook':
@@ -134,6 +139,10 @@ export function handleServiceMethod(verb: string, c: XrpcContext, deps: ServiceD
       return respondFromBody(c, (body) => updateWatched(deps.db, deps.tab, body))
     case 'removeWatchedDid':
       return respondFromBody(c, (body) => removeWatched(deps.db, deps.tab, body.did))
+    case 'addBlockedDid':
+      return respondFromBody(c, (body) => blockDid(deps.db, deps.blocklist, body))
+    case 'removeBlockedDid':
+      return respondFromBody(c, (body) => unblockDid(deps.db, deps.blocklist, body.did))
     case 'backfillEvents':
       return respondFromBody(c, (body) => backfillEvents(deps.db, body))
 
@@ -305,4 +314,8 @@ async function getAudiences(c: XrpcContext, { db }: ServiceDeps) {
 
 async function getWatchedDids(c: XrpcContext, { db }: ServiceDeps) {
   return c.json({ watchedDids: await listWatched(db, c.req.query('active') === '1') })
+}
+
+async function getBlockedDids(c: XrpcContext, { db }: ServiceDeps) {
+  return c.json({ blockedDids: await listBlocked(db) })
 }

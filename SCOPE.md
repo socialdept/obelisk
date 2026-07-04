@@ -94,6 +94,11 @@ holds; the collection plane's write verbs stay `MethodNotImplemented`.
   import via `com.atproto.sync.getRepo`, every collection, through the existing
   `applyEvent` path (`@atcute/repo` CAR reader, Bun-native). Idempotent via the
   commit `rev`; stamps `watched_dids.snapshot_at`. The footprint-audit primitive.
+- DID deny-list (`addBlockedDid`/`removeBlockedDid`/`getBlockedDids`, LAB-47) —
+  a shared in-memory blocklist the ingester consults, so a blocked repo's events
+  arrive from Tab but are never archived (global, archive-side). Optional
+  `purge` (soft-delete existing) / `purge+force` (hard-delete). Complements the
+  query-time `neq`/`nin` per-consumer mute (LAB-46). A deny mirror of watched-DIDs.
 - Dev mode, bearer-token auth
 
 ## In scope — now (closes the stated consumer needs)
