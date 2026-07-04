@@ -28,4 +28,30 @@ export default {
       path: 'publication',
     },
   },
+  // Named ranking profiles (LAB-37): score = Σ weightᵢ · transformᵢ(signalᵢ).
+  // The `interactions` term is 0 until the rollup lands (LAB-39/40).
+  rankings: {
+    // Search: relevance first, freshness as a tiebreaker.
+    'relevant-fresh': {
+      signals: [
+        { kind: 'relevance', weight: 1 },
+        { kind: 'recency', weight: 0.3, field: 'indexedAt', halfLifeHours: 168 },
+      ],
+    },
+    // Publishing "trending": recommends weigh most, decayed over a week.
+    trending: {
+      signals: [
+        {
+          kind: 'interactions',
+          weight: 1,
+          transform: 'log1p',
+          links: [
+            { collection: 'site.standard.graph.subscription', path: 'publication', weight: 1 },
+            { collection: 'site.standard.graph.recommend', path: 'document', weight: 3 },
+          ],
+        },
+        { kind: 'recency', weight: 1, field: 'indexedAt', halfLifeHours: 168 },
+      ],
+    },
+  },
 } satisfies ObeliskConfig

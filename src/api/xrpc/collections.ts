@@ -11,6 +11,13 @@ import { records } from '../../db/schema'
 import { xrpcError, type XrpcContext } from './respond'
 import { SERVICE_NS, handleServiceMethod } from './service'
 import { sortClause, whereFilters, type WhereClause } from './where'
+import {
+  compileRanking,
+  decodeRankingCursor,
+  encodeRankingCursor,
+  rankingCursorFilter,
+  type RankingCursor,
+} from '../../ranking/compile'
 
 const NSID_RE = /^[a-z][a-z0-9-]*(\.[a-z0-9-]+)+\.[a-zA-Z][a-zA-Z0-9]*$/
 const MAX_LIMIT = 100
@@ -23,6 +30,7 @@ interface QueryBody {
   includeDeleted?: boolean
   q?: string
   semantic?: boolean
+  ranking?: string
 }
 
 /**
@@ -79,7 +87,7 @@ export function xrpcRoutes(deps: XrpcDeps): Hono {
       case 'countRecords':
         return countRecords(c, db, collection)
       case 'searchRecords':
-        return searchRecords(c, db, ollama, collection)
+        return searchRecords(c, db, ollama, deps.config, collection)
       case 'createRecord':
       case 'updateRecord':
       case 'deleteRecord':
@@ -150,7 +158,13 @@ async function countRecords(c: XrpcContext, db: Db, collection: string) {
   return c.json({ count: Number(rows[0]?.count ?? 0) })
 }
 
-async function searchRecords(c: XrpcContext, db: Db, ollama: OllamaClient, collection: string) {
+async function searchRecords(
+  c: XrpcContext,
+  db: Db,
+  ollama: OllamaClient,
+  config: ObeliskConfig,
+  collection: string,
+) {
   const body = await parseBody(c)
   if (!body.q || typeof body.q !== 'string') {
     return xrpcError(c, 400, 'InvalidRequest', 'q is required')
@@ -159,6 +173,13 @@ async function searchRecords(c: XrpcContext, db: Db, ollama: OllamaClient, colle
   const built = buildFilters(collection, body)
   if ('error' in built) return xrpcError(c, 400, 'InvalidRequest', built.error)
   const limit = clampLimit(body.limit)
+
+  if (body.ranking) {
+    if (body.semantic) {
+      return xrpcError(c, 400, 'InvalidRequest', 'semantic ranking is not supported yet (see LAB-41)')
+    }
+    return rankedSearch(c, db, config, body, built.filters, limit)
+  }
 
   if (body.semantic) {
     const [queryVector] = await ollama.embed([body.q])
@@ -191,6 +212,58 @@ async function searchRecords(c: XrpcContext, db: Db, ollama: OllamaClient, colle
     LIMIT ${limit}
   `)
   return c.json({ records: rows.map((row) => ({ ...serialize(row), rank: row.rank })) })
+}
+
+/**
+ * Keyword search ordered by a named ranking profile instead of raw `ts_rank`.
+ * FTS relevance feeds the profile's `relevance` signal; recency/interactions add
+ * to the score. Paged with the ranking compound `(score, id)` cursor.
+ */
+async function rankedSearch(
+  c: XrpcContext,
+  db: Db,
+  config: ObeliskConfig,
+  body: QueryBody,
+  filters: SQL[],
+  limit: number,
+) {
+  const profile = config.rankings?.[body.ranking!]
+  if (!profile) return xrpcError(c, 400, 'InvalidRequest', `unknown ranking profile: ${body.ranking}`)
+
+  // Decode the cursor first: it carries the `now` anchor so recency scores stay
+  // identical across pages (a live clock would drift the boundary row's score).
+  let prev: RankingCursor | undefined
+  if (body.cursor) {
+    const decoded = decodeRankingCursor(body.cursor)
+    if ('error' in decoded) return xrpcError(c, 400, 'InvalidRequest', decoded.error)
+    prev = decoded
+  }
+  const anchorMs = prev?.anchorMs ?? Date.now()
+  const anchor = sql`${new Date(anchorMs).toISOString()}::timestamptz`
+
+  const relevance = sql`ts_rank(searchable, websearch_to_tsquery('english', ${body.q!}))`
+  const compiled = compileRanking(profile, { relevance, idColumn: sql`records.id`, now: anchor })
+
+  const cursorClause = prev
+    ? rankingCursorFilter(compiled.score, sql`records.id`, prev.score, prev.id)
+    : sql`TRUE`
+
+  const rows = await db.execute<RecordRowRaw & { id: number; score: number }>(sql`
+    SELECT did, collection, rkey, uri, cid, record, indexed_at,
+           records.id AS id, (${compiled.score}) AS score
+    FROM records
+    WHERE searchable @@ websearch_to_tsquery('english', ${body.q!})
+      AND ${and(...filters)}
+      AND ${cursorClause}
+    ORDER BY ${compiled.orderBy}
+    LIMIT ${limit}
+  `)
+
+  const last = rows.at(-1)
+  return c.json({
+    records: rows.map((row) => ({ ...serialize(row), score: Number(row.score) })),
+    cursor: last ? encodeRankingCursor({ score: Number(last.score), id: last.id, anchorMs }) : undefined,
+  })
 }
 
 function buildFilters(collection: string, body: QueryBody): { filters: SQL[] } | { error: string } {

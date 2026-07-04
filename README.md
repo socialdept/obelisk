@@ -85,9 +85,21 @@ curl -X POST "localhost:6060/xrpc/site.standard.document.getRecords" -d '{
 curl "localhost:6060/xrpc/site.standard.document.getRecord?uri=at://…"
 curl -X POST "localhost:6060/xrpc/site.standard.document.countRecords" -d '{"where": {…}}'
 curl -X POST "localhost:6060/xrpc/site.standard.document.searchRecords" -d '{"q": "atproto", "semantic": true}'
+# keyword search ordered by a named ranking profile instead of raw ts_rank
+curl -X POST "localhost:6060/xrpc/site.standard.document.searchRecords" -d '{"q": "atproto", "ranking": "relevant-fresh"}'
 ```
 
 `where` supports record fields (dot paths like `content.$type`, resolved against the record body — **not** prefixed with `value`), system fields (`did`, `collection`, `rkey`, `uri`, `cid`, `rev`, `indexedAt`), and the special `json` field (whole-record search). System fields win on a name clash; prefix with `record.` (e.g. `record.did`) to force a JSON-path lookup and reach a record whose own body carries a `did`/`uri`/… key. Responses use atproto conventions (`{uri, cid, did, collection, value, indexedAt}`, `{error, message}` errors). Write verbs return `MethodNotImplemented` — Obelisk is a read-only archive.
+
+#### Ranking profiles (LAB-37)
+
+`searchRecords` accepts a `ranking: "<profile>"` to order by a configured score instead of raw relevance. A profile (in `obelisk.config.ts` under `rankings`) is a **linear weighted sum** of signals — `score = Σ weightᵢ · transformᵢ(signalᵢ)`:
+
+- `relevance` — the FTS/vector match quality (contributes **0** when there's no `q`, so the same profile ranks a search box and a chrono-less feed);
+- `interactions` — inbound-link popularity per a config `{collection, path, weight}` link spec (currently **stubbed to 0** until the rollup lands, LAB-39/40);
+- `recency` — `exp` half-life decay over `indexedAt` or a `record.<path>` timestamp.
+
+Results carry a per-row `score` and a compound `(score, id)` cursor that carries its own `now` anchor, so ranked pagination stays stable as the clock (and later, counts) move. Unknown profile → `InvalidRequest`. `semantic` + `ranking` together are not supported yet (LAB-41). Ranking, like everything else, is **config, not code** — no lexicon baked in.
 
 ### Service plane — `/xrpc/social.dept.obelisk.{verb}`
 

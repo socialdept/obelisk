@@ -38,6 +38,26 @@ export const testConfig: ObeliskConfig = {
   ollama: { model: 'nomic-embed-text', dimensions: 768, chunkChars: 1800, chunkOverlap: 200 },
   constellation: { baseUrl: 'https://constellation.example', ttlSeconds: 3600, userAgent: 'obelisk-test' },
   feeds: { following: { collection: 'site.standard.graph.subscription', path: 'publication' } },
+  rankings: {
+    recent: { signals: [{ kind: 'recency', weight: 1, field: 'indexedAt', halfLifeHours: 24 }] },
+    'relevant-fresh': {
+      signals: [
+        { kind: 'relevance', weight: 1 },
+        { kind: 'recency', weight: 0.5, field: 'indexedAt', halfLifeHours: 24 },
+      ],
+    },
+    engaged: {
+      signals: [
+        {
+          kind: 'interactions',
+          weight: 2,
+          transform: 'log1p',
+          links: [{ collection: 'site.standard.graph.recommend', path: 'document', weight: 1 }],
+        },
+        { kind: 'recency', weight: 1, field: 'indexedAt', halfLifeHours: 24 },
+      ],
+    },
+  },
 }
 
 let tidCounter = 0

@@ -1,3 +1,5 @@
+import { validateRankings, type RankingConfig } from './ranking/config'
+
 /**
  * Per-collection overrides. Everything here is OPTIONAL — when omitted, field
  * locations are derived from the collection's own published lexicon.
@@ -13,6 +15,8 @@ export interface CollectionConfig {
 
 export interface ObeliskConfig {
   collections: Record<string, CollectionConfig>
+  /** Named ranking profiles (LAB-37) consumed by search + feed skeleton. Optional. */
+  rankings?: RankingConfig
   ollama: {
     model: string
     dimensions: number
@@ -73,4 +77,5 @@ function validateConfig(config: ObeliskConfig): void {
   if (config.constellation.ttlSeconds < 0) {
     throw new Error('constellation.ttlSeconds must be >= 0')
   }
+  validateRankings(config.rankings)
 }
