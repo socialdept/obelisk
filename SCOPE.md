@@ -79,6 +79,17 @@ holds; the collection plane's write verbs stay `MethodNotImplemented`.
   (`date_trunc`, allowlisted); `count`/`count_distinct`. Interaction counts,
   subscriber growth, activity-over-time — all composed generically, none named
   in code. Group-by/agg expressions are whitelisted; no raw SQL, no migration.
+- Ranking substrate + serving adapters (LAB-37 epic) — a config-defined
+  **linear-sum score** (`relevance` FTS/vector · `interactions` inbound-link
+  popularity · `recency` decay) compiled to one `ORDER BY` with an anchor-stable
+  compound cursor (LAB-38). Interaction counts live in a `target_uri`-keyed
+  rollup maintained off ingest (LAB-39), sourced per collection **local vs
+  Constellation** (consumed + backfilled → local, else network backlinks;
+  LAB-40). `searchRecords` gains `mode: hybrid` (RRF fusion of FTS + vector,
+  LAB-41) and a `ranking` param; `getRankedFeed` (LAB-44) serves a
+  `{feed:[{post}],cursor}` skeleton over the **authenticated** plane — the
+  consuming app relays it into its own feed generator, Obelisk exposes no public
+  feed-gen endpoint. Lexicon-generic: interaction specs + profiles are config.
 - DID-scoped backfill (`scripts/backfill-repo.ts`, LAB-28) — one-shot full-repo
   import via `com.atproto.sync.getRepo`, every collection, through the existing
   `applyEvent` path (`@atcute/repo` CAR reader, Bun-native). Idempotent via the

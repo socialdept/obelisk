@@ -23,6 +23,7 @@ import {
   type ManageResult,
 } from '../../webhooks/manage'
 import { runAggregate, type AggregateInput } from '../routes/aggregate'
+import { rankedFeed, type RankedFeedInput } from '../routes/feed'
 import { backfillStatus } from '../backfill'
 import { backfillEvents, queryEvents } from '../routes/events'
 import { getRecordLinks, queryBacklinks, queryNetworkBacklinks } from '../routes/links'
@@ -82,6 +83,8 @@ export function handleServiceMethod(verb: string, c: XrpcContext, deps: ServiceD
       return getFootprint(c, deps)
     case 'aggregate':
       return aggregate(c, deps)
+    case 'getRankedFeed':
+      return getRankedFeed(c, deps)
     case 'getBackfillStatus':
       return getBackfillStatus(c, deps)
     case 'getWebhooks':
@@ -250,6 +253,35 @@ async function aggregateInput(c: XrpcContext): Promise<AggregateInput> {
     limit: numParam(c.req.query('limit')),
     includeDeleted: c.req.query('includeDeleted') === '1',
   }
+}
+
+/**
+ * Ranked feed skeleton — `{feed:[{post:uri}], cursor}` from a feed/audience/where
+ * filter ordered by a ranking profile (chrono when none). Authenticated (no
+ * public endpoint); the consuming app relays this into its own feed generator.
+ * GET carries scalar params; POST additionally carries a `where` body.
+ */
+async function getRankedFeed(c: XrpcContext, { db, config }: ServiceDeps) {
+  const result = await rankedFeed(db, config, await rankedFeedInput(c))
+  if ('error' in result) return xrpcError(c, 400, 'InvalidRequest', result.error)
+  return c.json(result)
+}
+
+async function rankedFeedInput(c: XrpcContext): Promise<RankedFeedInput> {
+  const query = c.req.query()
+  const base: RankedFeedInput = {
+    collection: query.collection,
+    audience: query.audience,
+    feed: query.feed,
+    ranking: query.ranking,
+    cursor: query.cursor,
+    limit: numParam(query.limit),
+    link: query, // `link.*` keys read out by linkFilters
+  }
+  if (c.req.method !== 'POST') return base
+  const body = (await c.req.json().catch(() => ({}))) as RankedFeedInput
+  // Body wins for structured fields; keep query's link.* (POST bodies rarely carry it).
+  return { ...base, ...body }
 }
 
 async function getBackfillStatus(c: XrpcContext, { db }: ServiceDeps) {
