@@ -1,4 +1,5 @@
 import { validateRankings, type RankingConfig } from './ranking/config'
+import type { InteractionSourceConfig } from './ranking/source'
 
 /**
  * Per-collection overrides. Everything here is OPTIONAL — when omitted, field
@@ -17,6 +18,8 @@ export interface ObeliskConfig {
   collections: Record<string, CollectionConfig>
   /** Named ranking profiles (LAB-37) consumed by search + feed skeleton. Optional. */
   rankings?: RankingConfig
+  /** Where the `interactions` signal sources counts per collection (LAB-40). Optional. */
+  interactionSources?: InteractionSourceConfig
   ollama: {
     model: string
     dimensions: number

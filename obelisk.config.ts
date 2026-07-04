@@ -54,4 +54,13 @@ export default {
       ],
     },
   },
+  // Where the `interactions` signal sources counts per collection (LAB-40).
+  // `auto` (default): local when we consume the collection AND it's backfilled,
+  // else Constellation. Override to pin a source.
+  interactionSources: {
+    threshold: 0.9,
+    overrides: {
+      // 'app.bsky.feed.like': 'constellation', // a collection we don't archive
+    },
+  },
 } satisfies ObeliskConfig
