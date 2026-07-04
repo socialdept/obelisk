@@ -9,11 +9,13 @@ import {
   compileRanking,
   decodeRankingCursor,
   encodeRankingCursor,
+  rankingAnchor,
   rankingCursorFilter,
   type RankingCursor,
 } from '../../ranking/compile'
 import { localInteractionCount } from '../../ranking/interactions'
 import { whereFilters, type WhereClause } from '../xrpc/where'
+import { clampLimit } from './records'
 
 const MAX_LIMIT = 100
 const DEFAULT_LIMIT = 50
@@ -86,8 +88,7 @@ export async function rankedFeed(
     if ('error' in decoded) return { error: decoded.error }
     prev = decoded
   }
-  const anchorMs = prev?.anchorMs ?? Date.now()
-  const anchor = sql`${new Date(anchorMs).toISOString()}::timestamptz`
+  const { anchorMs, anchor } = rankingAnchor(prev)
 
   const compiled = compileRanking(profile, {
     idColumn: sql`records.id`,
@@ -101,7 +102,7 @@ export async function rankedFeed(
     FROM records
     WHERE ${and(...filters)} AND ${cursorClause}
     ORDER BY ${compiled.orderBy}
-    LIMIT ${clampLimit(input.limit)}
+    LIMIT ${clampLimit(input.limit, DEFAULT_LIMIT, MAX_LIMIT)}
   `)
 
   const last = rows.at(-1)
@@ -109,10 +110,4 @@ export async function rankedFeed(
     feed: rows.map((row) => ({ post: row.uri })),
     cursor: last ? encodeRankingCursor({ score: Number(last.score), id: last.id, anchorMs }) : null,
   }
-}
-
-function clampLimit(raw: unknown): number {
-  const limit = Number(raw ?? DEFAULT_LIMIT)
-  if (!Number.isInteger(limit) || limit < 1) return DEFAULT_LIMIT
-  return Math.min(limit, MAX_LIMIT)
 }

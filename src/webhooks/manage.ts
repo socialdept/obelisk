@@ -23,6 +23,11 @@ export interface WebhookInput {
 /** Uniform result: `{ error }` carries an atproto error name + HTTP status for the XRPC layer. */
 export type ManageResult<T> = { data: T } | { error: string; message: string; status: 400 | 404 | 409 }
 
+/** Shared `{ error }` constructors for management functions (the XRPC layer maps them to responses). */
+export const invalid = (message: string) => ({ error: 'InvalidRequest', message, status: 400 as const })
+export const notFound = (message: string) => ({ error: 'NotFound', message, status: 404 as const })
+export const conflict = (message: string) => ({ error: 'AlreadyExists', message, status: 409 as const })
+
 export function serializeWebhook(sub: WebhookSubscription) {
   return {
     id: sub.id,
@@ -51,7 +56,7 @@ export async function listWebhooks(db: Db) {
 
 export async function getWebhook(db: Db, id: number): Promise<ManageResult<object>> {
   const sub = await findSub(db, id)
-  if (!sub) return notFound()
+  if (!sub) return notFound('subscription not found')
   return { data: { webhook: serializeWebhook(sub) } }
 }
 
@@ -88,7 +93,7 @@ export async function createWebhook(db: Db, input: WebhookInput): Promise<Manage
 export async function updateWebhook(db: Db, input: WebhookInput): Promise<ManageResult<object>> {
   if (input.id === undefined) return invalid('id is required')
   const sub = await findSub(db, input.id)
-  if (!sub) return notFound()
+  if (!sub) return notFound('subscription not found')
 
   const updates: Partial<typeof webhookSubscriptions.$inferInsert> = {}
   if (input.url !== undefined) updates.url = input.url
@@ -119,7 +124,7 @@ export async function updateWebhook(db: Db, input: WebhookInput): Promise<Manage
 export async function deleteWebhook(db: Db, id: number | undefined): Promise<ManageResult<{ deleted: true }>> {
   if (id === undefined) return invalid('id is required')
   const sub = await findSub(db, id)
-  if (!sub) return notFound()
+  if (!sub) return notFound('subscription not found')
 
   await db.delete(webhookSubscriptions).where(eq(webhookSubscriptions.id, sub.id))
   return { data: { deleted: true } }
@@ -132,7 +137,7 @@ export async function testWebhook(
 ): Promise<ManageResult<{ delivered: boolean; status?: number; error?: string }>> {
   if (id === undefined) return invalid('id is required')
   const sub = await findSub(db, id)
-  if (!sub) return notFound()
+  if (!sub) return notFound('subscription not found')
 
   const body = JSON.stringify({
     subscription: sub.name,
@@ -176,7 +181,3 @@ async function findSub(db: Db, id: number): Promise<WebhookSubscription | undefi
   const rows = await db.select().from(webhookSubscriptions).where(eq(webhookSubscriptions.id, id))
   return rows[0]
 }
-
-const invalid = (message: string) => ({ error: 'InvalidRequest', message, status: 400 as const })
-const notFound = () => ({ error: 'NotFound', message: 'subscription not found', status: 404 as const })
-const conflict = (message: string) => ({ error: 'AlreadyExists', message, status: 409 as const })

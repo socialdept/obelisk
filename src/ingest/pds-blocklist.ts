@@ -2,7 +2,7 @@ import { desc, eq } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { blockedPdses, didPds, type BlockedPdsRow } from '../db/schema'
 import { resolvePds as resolvePdsDefault } from '../lexicon/resolver'
-import type { ManageResult } from '../webhooks/manage'
+import { invalid, notFound, type ManageResult } from '../webhooks/manage'
 
 const DEFAULT_TTL_MS = 86_400_000 // 24h
 
@@ -136,10 +136,8 @@ export async function unblockPds(
 ): Promise<ManageResult<{ unblocked: string }>> {
   if (!pattern) return invalid('pattern is required')
   const deleted = await db.delete(blockedPdses).where(eq(blockedPdses.pattern, pattern)).returning()
-  if (deleted.length === 0) return notFound()
+  if (deleted.length === 0) return notFound('pds pattern is not blocked')
   await blocklist.loadPatterns()
   return { data: { unblocked: pattern } }
 }
 
-const invalid = (message: string) => ({ error: 'InvalidRequest', message, status: 400 as const })
-const notFound = () => ({ error: 'NotFound', message: 'pds pattern is not blocked', status: 404 as const })

@@ -1,7 +1,7 @@
 import { and, desc, eq, isNull } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { blockedDids, records, type BlockedDidRow } from '../db/schema'
-import type { ManageResult } from '../webhooks/manage'
+import { invalid, notFound, type ManageResult } from '../webhooks/manage'
 
 /**
  * In-memory deny-list of DIDs whose records are never archived (LAB-47). Held as
@@ -100,10 +100,8 @@ export async function unblockDid(
 ): Promise<ManageResult<{ unblocked: string }>> {
   if (!did) return invalid('did is required')
   const deleted = await db.delete(blockedDids).where(eq(blockedDids.did, did)).returning()
-  if (deleted.length === 0) return notFound()
+  if (deleted.length === 0) return notFound('did is not blocked')
   blocklist.removeLocal(did)
   return { data: { unblocked: did } }
 }
 
-const invalid = (message: string) => ({ error: 'InvalidRequest', message, status: 400 as const })
-const notFound = () => ({ error: 'NotFound', message: 'did is not blocked', status: 404 as const })

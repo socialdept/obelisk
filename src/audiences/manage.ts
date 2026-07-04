@@ -2,7 +2,7 @@ import { eq } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { audiences, type AudienceDefinition, type AudienceRow } from '../db/schema'
 import { findAudience, isMember, listMembers, validateDefinition } from './definition'
-import type { ManageResult } from '../webhooks/manage'
+import { conflict, invalid, notFound, type ManageResult } from '../webhooks/manage'
 
 export async function listAudiences(db: Db): Promise<AudienceRow[]> {
   return db.select().from(audiences)
@@ -11,7 +11,7 @@ export async function listAudiences(db: Db): Promise<AudienceRow[]> {
 export async function getAudience(db: Db, name: string | undefined): Promise<ManageResult<object>> {
   if (!name) return invalid('name is required')
   const audience = await findAudience(db, name)
-  if (!audience) return notFound()
+  if (!audience) return notFound('audience not found')
   return { data: { audience } }
 }
 
@@ -40,7 +40,7 @@ export async function updateAudience(
 ): Promise<ManageResult<object>> {
   if (!input.name) return invalid('name is required')
   const audience = await findAudience(db, input.name)
-  if (!audience) return notFound()
+  if (!audience) return notFound('audience not found')
 
   if (!input.definition) return invalid('definition is required')
   const problem = validateDefinition(input.definition)
@@ -57,7 +57,7 @@ export async function updateAudience(
 export async function deleteAudience(db: Db, name: string | undefined): Promise<ManageResult<{ deleted: true }>> {
   if (!name) return invalid('name is required')
   const audience = await findAudience(db, name)
-  if (!audience) return notFound()
+  if (!audience) return notFound('audience not found')
 
   await db.delete(audiences).where(eq(audiences.id, audience.id))
   return { data: { deleted: true } }
@@ -70,7 +70,7 @@ export async function audienceMembers(
 ): Promise<ManageResult<{ name: string; members: string[]; limit: number; offset: number }>> {
   if (!name) return invalid('name is required')
   const audience = await findAudience(db, name)
-  if (!audience) return notFound()
+  if (!audience) return notFound('audience not found')
 
   const limit = Math.min(opts.limit ?? 100, 1000)
   const offset = Math.max(opts.offset ?? 0, 0)
@@ -85,12 +85,9 @@ export async function checkMember(
 ): Promise<ManageResult<{ name: string; did: string; member: boolean }>> {
   if (!name || !did) return invalid('name and did are required')
   const audience = await findAudience(db, name)
-  if (!audience) return notFound()
+  if (!audience) return notFound('audience not found')
 
   const member = await isMember(db, audience.definition, did)
   return { data: { name: audience.name, did, member } }
 }
 
-const invalid = (message: string) => ({ error: 'InvalidRequest', message, status: 400 as const })
-const notFound = () => ({ error: 'NotFound', message: 'audience not found', status: 404 as const })
-const conflict = (message: string) => ({ error: 'AlreadyExists', message, status: 409 as const })

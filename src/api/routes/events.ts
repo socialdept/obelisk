@@ -6,7 +6,7 @@ import { events, records } from '../../db/schema'
 import { buildFeedFilter, linkFilters } from '../../feeds/filter'
 import type { ManageResult } from '../../webhooks/manage'
 import { whereFilters, type WhereClause } from '../xrpc/where'
-import { recordJsonFilters } from './records'
+import { clampLimit, recordJsonFilters } from './records'
 
 const MAX_LIMIT = 500
 
@@ -29,7 +29,7 @@ export async function queryEvents(
   config: ObeliskConfig,
   query: Record<string, string | undefined>,
 ): Promise<EventsResult | { error: string }> {
-  const limit = parseEventLimit(query.limit)
+  const limit = clampLimit(query.limit, 200, MAX_LIMIT)
 
   const order = query.order ?? 'asc'
   if (order !== 'asc' && order !== 'desc') return { error: `invalid order: ${order} (expected asc or desc)` }
@@ -96,12 +96,6 @@ export async function queryEvents(
     })),
     cursor: last ? String(last.event.id) : null,
   }
-}
-
-function parseEventLimit(raw: string | undefined): number {
-  const limit = Number(raw ?? 200)
-  if (!Number.isInteger(limit) || limit < 1) return 200
-  return Math.min(limit, MAX_LIMIT)
 }
 
 export interface BackfillEventsInput {

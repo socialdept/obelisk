@@ -37,10 +37,15 @@ export function recordFilters(query: {
   return filters
 }
 
+/** Parse a positive-integer limit; `fallback` on missing/invalid, capped at `max`. */
+export function clampLimit(raw: unknown, fallback: number, max: number): number {
+  const limit = Number(raw ?? fallback)
+  if (!Number.isInteger(limit) || limit < 1) return fallback
+  return Math.min(limit, max)
+}
+
 export function parseLimit(raw: string | undefined): number {
-  const limit = Number(raw ?? 50)
-  if (!Number.isInteger(limit) || limit < 1) return 50
-  return Math.min(limit, MAX_LIMIT)
+  return clampLimit(raw, 50, MAX_LIMIT)
 }
 
 export function serializeRecord(row: typeof records.$inferSelect) {

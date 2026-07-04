@@ -1,7 +1,8 @@
 import { and, sql, type SQL } from 'drizzle-orm'
 import type { Db } from '../../db/client'
 import { events, recordLinks, records } from '../../db/schema'
-import type { ManageResult } from '../../webhooks/manage'
+import { invalid, type ManageResult } from '../../webhooks/manage'
+import { clampLimit } from './records'
 import { jsonPath, whereFilters, type WhereClause } from '../xrpc/where'
 
 const MAX_LIMIT = 500
@@ -102,7 +103,6 @@ const SOURCES: Record<AggregateSource, SourceSpec> = {
 
 type Resolved = { expr: SQL } | { error: string }
 
-const invalid = (message: string): ManageResult<never> => ({ error: 'InvalidRequest', message, status: 400 })
 
 /**
  * Generic grouped aggregate behind `social.dept.obelisk.aggregate`. Builds a
@@ -151,7 +151,7 @@ export async function runAggregate(
     filters.push(sql`${spec.time.col} <= ${until}`)
   }
 
-  const limit = clampLimit(input.limit)
+  const limit = clampLimit(input.limit, DEFAULT_LIMIT, MAX_LIMIT)
   const selectDims = dims.map((expr, i) => sql`${expr} AS ${sql.raw(`g${i}`)}`)
   const selectList = sql.join([...selectDims, sql`${agg.expr} AS value`], sql`, `)
   const whereClause = filters.length ? sql`WHERE ${and(...filters)}` : sql``
@@ -227,10 +227,4 @@ function resolveOrder(orderBy: string | undefined, tokens: string[]): Resolved {
   const i = tokens.indexOf(orderBy)
   if (i === -1) return { error: `cannot order by "${orderBy}" (expected count or a groupBy dimension)` }
   return { expr: sql`${sql.raw(String(i + 1))} ASC` }
-}
-
-function clampLimit(raw: unknown): number {
-  const limit = Number(raw ?? DEFAULT_LIMIT)
-  if (!Number.isInteger(limit) || limit < 1) return DEFAULT_LIMIT
-  return Math.min(limit, MAX_LIMIT)
 }

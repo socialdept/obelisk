@@ -132,6 +132,16 @@ export interface RankingCursor {
   anchorMs: number
 }
 
+/**
+ * The `now` anchor for a ranked query: reuse the cursor's (so recency scores stay
+ * stable across pages), else now. `anchor` is `::timestamptz` (not a Date param —
+ * that path doesn't serialize) for `compileRanking`'s `now`.
+ */
+export function rankingAnchor(prev?: RankingCursor): { anchorMs: number; anchor: SQL } {
+  const anchorMs = prev?.anchorMs ?? Date.now()
+  return { anchorMs, anchor: sql`${new Date(anchorMs).toISOString()}::timestamptz` }
+}
+
 /** Opaque `(score, id, anchor)` cursor — base64 of `<score>|<id>|<anchorMs>`. */
 export function encodeRankingCursor(cursor: RankingCursor): string {
   return Buffer.from(`${cursor.score}|${cursor.id}|${cursor.anchorMs}`).toString('base64url')

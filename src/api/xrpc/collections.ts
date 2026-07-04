@@ -15,6 +15,7 @@ import {
   compileRanking,
   decodeRankingCursor,
   encodeRankingCursor,
+  rankingAnchor,
   rankingCursorFilter,
   type RankingCursor,
 } from '../../ranking/compile'
@@ -23,6 +24,7 @@ import type { RankingProfile } from '../../ranking/config'
 import type { Blocklist } from '../../ingest/blocklist'
 import type { PdsBlocklist } from '../../ingest/pds-blocklist'
 import { computeFacets, highlightExpr, type FacetBucket } from '../routes/search-enrich'
+import { clampLimit } from '../routes/records'
 
 const NSID_RE = /^[a-z][a-z0-9-]*(\.[a-z0-9-]+)+\.[a-zA-Z][a-zA-Z0-9]*$/
 const MAX_LIMIT = 100
@@ -128,7 +130,7 @@ async function getRecords(c: XrpcContext, db: Db, collection: string) {
   const order = sortClause(body.sortBy)
   if ('error' in order) return xrpcError(c, 400, 'InvalidRequest', order.error)
 
-  const limit = clampLimit(body.limit)
+  const limit = clampLimit(body.limit, 50, MAX_LIMIT)
   const offset = decodeCursor(body.cursor)
   if (offset === null) return xrpcError(c, 400, 'InvalidRequest', 'invalid cursor')
 
@@ -187,7 +189,7 @@ async function searchRecords(
 
   const built = buildFilters(collection, body)
   if ('error' in built) return xrpcError(c, 400, 'InvalidRequest', built.error)
-  const limit = clampLimit(body.limit)
+  const limit = clampLimit(body.limit, 50, MAX_LIMIT)
 
   const mode = body.mode ?? (body.semantic ? 'semantic' : 'fts')
   if (mode !== 'fts' && mode !== 'semantic' && mode !== 'hybrid') {
@@ -359,8 +361,7 @@ async function runRanked(
     if ('error' in decoded) return xrpcError(c, 400, 'InvalidRequest', decoded.error)
     prev = decoded
   }
-  const anchorMs = prev?.anchorMs ?? Date.now()
-  const anchor = sql`${new Date(anchorMs).toISOString()}::timestamptz`
+  const { anchorMs, anchor } = rankingAnchor(prev)
 
   const compiled = compileRanking(q.profile, {
     relevance: q.relevance,
@@ -428,12 +429,6 @@ function serialize(row: RecordRowRaw & { highlight?: string }) {
 /** Optional `ts_headline` column for the SELECT, gated on `highlight`. */
 function highlightColumn(body: QueryBody): SQL {
   return body.highlight ? sql`, ${highlightExpr(body.q!)} AS highlight` : sql``
-}
-
-function clampLimit(raw: unknown): number {
-  const limit = Number(raw ?? 50)
-  if (!Number.isInteger(limit) || limit < 1) return 50
-  return Math.min(limit, MAX_LIMIT)
 }
 
 function decodeCursor(cursor: string | undefined): number | null {

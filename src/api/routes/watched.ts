@@ -2,7 +2,7 @@ import { and, desc, eq, isNull, lt, sql } from 'drizzle-orm'
 import type { Db } from '../../db/client'
 import { records, watchedDids, type WatchedDidRow } from '../../db/schema'
 import { TabAdmin } from '../../ingest/tab-admin'
-import type { ManageResult } from '../../webhooks/manage'
+import { conflict, invalid, notFound, type ManageResult } from '../../webhooks/manage'
 import { parseLimit, serializeRecord } from './records'
 
 interface WatchedInput {
@@ -101,7 +101,7 @@ export async function listWatched(db: Db, activeOnly: boolean) {
 export async function getWatched(db: Db, did: string | undefined): Promise<ManageResult<object>> {
   if (!did) return invalid('did is required')
   const row = await findWatched(db, did)
-  if (!row) return notFound()
+  if (!row) return notFound('watched did not found')
   return { data: { watchedDid: serializeWatched(row) } }
 }
 
@@ -123,7 +123,7 @@ export async function addWatched(db: Db, tab: TabAdmin, input: WatchedInput): Pr
 export async function updateWatched(db: Db, tab: TabAdmin, input: WatchedInput): Promise<ManageResult<object>> {
   if (!input.did) return invalid('did is required')
   const row = await findWatched(db, input.did)
-  if (!row) return notFound()
+  if (!row) return notFound('watched did not found')
 
   const updates: Partial<typeof watchedDids.$inferInsert> = {}
   if (input.note !== undefined) updates.note = input.note
@@ -147,7 +147,7 @@ export async function removeWatched(
 ): Promise<ManageResult<{ deleted: true }>> {
   if (!did) return invalid('did is required')
   const row = await findWatched(db, did)
-  if (!row) return notFound()
+  if (!row) return notFound('watched did not found')
 
   await db.delete(watchedDids).where(eq(watchedDids.id, row.id))
   await tab.removeRepos([row.did])
@@ -159,6 +159,3 @@ async function findWatched(db: Db, did: string): Promise<WatchedDidRow | undefin
   return rows[0]
 }
 
-const invalid = (message: string) => ({ error: 'InvalidRequest', message, status: 400 as const })
-const notFound = () => ({ error: 'NotFound', message: 'watched did not found', status: 404 as const })
-const conflict = (message: string) => ({ error: 'AlreadyExists', message, status: 409 as const })
