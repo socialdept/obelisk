@@ -53,8 +53,8 @@ beforeEach(async () => {
 describe('applyEvent blocklist skip', () => {
   test('an event from a blocked DID is not archived; others are', async () => {
     const blocked = new Set([SPAM])
-    await applyEvent(db, testConfig, makeEvent({ did: SPAM, rkey: 'a' }), blocked)
-    await applyEvent(db, testConfig, makeEvent({ did: 'did:plc:ok', rkey: 'b' }), blocked)
+    await applyEvent(db, testConfig, makeEvent({ did: SPAM, rkey: 'a' }), { skipDid: (d) => blocked.has(d) })
+    await applyEvent(db, testConfig, makeEvent({ did: 'did:plc:ok', rkey: 'b' }), { skipDid: (d) => blocked.has(d) })
 
     expect(await countRecords(SPAM)).toBe(0)
     expect(await countRecords('did:plc:ok')).toBe(1)
@@ -69,7 +69,7 @@ describe(`${NS}.addBlockedDid`, () => {
 
     // The shared set is live — a subsequent ingest is skipped with no reload.
     expect(blocklist.has(SPAM)).toBe(true)
-    await applyEvent(db, testConfig, makeEvent({ did: SPAM, rkey: 'x' }), blocklist.snapshot())
+    await applyEvent(db, testConfig, makeEvent({ did: SPAM, rkey: 'x' }), { skipDid: (d) => blocklist.has(d) })
     expect(await countRecords(SPAM)).toBe(0)
 
     const list = (await (await app.request(`/xrpc/${NS}.getBlockedDids`, { headers: AUTH })).json()) as {
@@ -122,7 +122,7 @@ describe(`${NS}.removeBlockedDid`, () => {
     expect(blocklist.has(SPAM)).toBe(false)
 
     // No longer skipped.
-    await applyEvent(db, testConfig, makeEvent({ did: SPAM, rkey: 'y' }), blocklist.snapshot())
+    await applyEvent(db, testConfig, makeEvent({ did: SPAM, rkey: 'y' }), { skipDid: (d) => blocklist.has(d) })
     expect(await countRecords(SPAM)).toBe(1)
   })
 

@@ -99,6 +99,12 @@ holds; the collection plane's write verbs stay `MethodNotImplemented`.
   arrive from Tab but are never archived (global, archive-side). Optional
   `purge` (soft-delete existing) / `purge+force` (hard-delete). Complements the
   query-time `neq`/`nin` per-consumer mute (LAB-46). A deny mirror of watched-DIDs.
+- PDS deny-list (`addBlockedPds`/`removeBlockedPds`/`getBlockedPdses`, LAB-48) —
+  block an entire PDS by wildcard pattern (`https://*.pds.host`). Events carry
+  only the DID, so each DID's PDS is resolved (reusing `resolvePds`, cached in
+  `did_pds` on a configurable TTL) and matched; the ingester pre-resolves a
+  batch's DIDs so the per-event skip stays sync. Future-block only; resolution
+  failure → archived (allow).
 - Dev mode, bearer-token auth
 
 ## In scope — now (closes the stated consumer needs)

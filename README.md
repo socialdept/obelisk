@@ -133,6 +133,7 @@ Obelisk's own cross-collection / archive operations, under the owned authority `
 | `getAudienceMembers?name=&limit=&offset=` / `checkAudienceMember?name=&did=` | Resolve members / test membership |
 | `getWatchedDids?active=` / `getWatchedDid?did=` | List / fetch the "who am I auditing" set |
 | `getBlockedDids` | List the DID deny-list — repos Obelisk refuses to archive |
+| `getBlockedPdses` | List the PDS deny-list — wildcard patterns whose repos are never archived |
 
 **Procedures (POST, JSON body — mutate Obelisk's own DB, never a PDS):**
 
@@ -147,6 +148,8 @@ Obelisk's own cross-collection / archive operations, under the owned authority `
 | `removeWatchedDid` | `{did}` | Un-watch + un-enroll |
 | `addBlockedDid` | `{did, note?, purge?, force?}` | **Deny-list a repo** — its events arrive from Tab but are never archived (in-memory skip, effective immediately). `purge` soft-deletes its existing records; `purge+force` hard-deletes them (cascades). Returns `{blocked, purged, mode}`. Complements query-time `nin` (per-consumer mute) with a global archive-side block |
 | `removeBlockedDid` | `{did}` | Un-block (does not restore purged records) |
+| `addBlockedPds` | `{pattern, note?}` | **Deny-list a PDS** by wildcard pattern (`https://*.pds.host`). Events carry only the DID, so each DID's PDS is resolved (via its DID doc, cached in `did_pds` on a TTL) and matched; matches are never archived. Future-block only; resolution failure → archived. Effective immediately |
+| `removeBlockedPds` | `{pattern}` | Remove a PDS pattern |
 | `backfillEvents` | `{collection?, did?, where?, includeDeleted?}` | Seed synthetic `create` (or `delete`) events for archived records that predate the event log, so a `cursor=start` consumer sees them. Idempotent (`NOT EXISTS` guard); `live:false` marks them historical. Returns `{seeded}` |
 
 ```bash
@@ -161,6 +164,7 @@ curl -X POST -H "$A" "localhost:6060/xrpc/social.dept.obelisk.aggregate" -d '{"s
 curl -H "$A" "localhost:6060/xrpc/social.dept.obelisk.getRankedFeed?feed=following:did:plc:…&collection=site.standard.document&ranking=relevant-fresh"
 curl -X POST -H "$A" "localhost:6060/xrpc/social.dept.obelisk.addWatchedDid" -d '{"did": "did:plc:…"}'
 curl -X POST -H "$A" "localhost:6060/xrpc/social.dept.obelisk.addBlockedDid" -d '{"did": "did:plc:spammer", "purge": true}'
+curl -X POST -H "$A" "localhost:6060/xrpc/social.dept.obelisk.addBlockedPds" -d '{"pattern": "https://*.pds.host"}'
 ```
 
 ### Backfill progress

@@ -6,6 +6,7 @@ import { OllamaClient } from './embed/ollama'
 import { EmbedWorker } from './embed/worker'
 import { Blocklist } from './ingest/blocklist'
 import { Ingester } from './ingest/ingester'
+import { PdsBlocklist } from './ingest/pds-blocklist'
 import { TabAdmin } from './ingest/tab-admin'
 import { createExtractionResolver } from './lexicon/collection'
 import { LexiconRegistry } from './lexicon/registry'
@@ -20,10 +21,12 @@ await migrate(env.databaseUrl)
 const { db, client } = createDb(env.databaseUrl)
 const ollama = new OllamaClient(env.ollamaUrl, config.ollama.model)
 const lexicons = new LexiconRegistry(db)
-// One shared deny-list: the ingester skips its DIDs, the API mutates it (LAB-47).
+// Shared deny-lists: the ingester skips their DIDs/PDSes, the API mutates them.
 const blocklist = new Blocklist()
 await blocklist.load(db)
-const ingester = new Ingester(db, config, {}, blocklist)
+const pdsBlocklist = new PdsBlocklist(db, undefined, (config.identity?.didPdsCacheTtlSeconds ?? 86_400) * 1000)
+await pdsBlocklist.loadPatterns()
+const ingester = new Ingester(db, config, {}, blocklist, pdsBlocklist)
 const embedWorker = new EmbedWorker(db, config, ollama, {
   textKeys: createTextKeysResolver(lexicons),
   extraction: createExtractionResolver(lexicons, config.collections),
@@ -55,7 +58,7 @@ ingester.start(env.tabWsUrl)
 embedWorker.start()
 webhookWorker.start()
 
-const app = createApp({ db, config, ollama, lexicons, tabAdmin, blocklist, devMode: env.devMode })
+const app = createApp({ db, config, ollama, lexicons, tabAdmin, blocklist, pdsBlocklist, devMode: env.devMode })
 const server = Bun.serve({ port: env.port, fetch: app.fetch, idleTimeout: 60 })
 
 console.log(`obelisk: ingesting + embedding, api on :${env.port}`)

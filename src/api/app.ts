@@ -4,6 +4,7 @@ import { ConstellationClient } from '../constellation/client'
 import type { Db } from '../db/client'
 import type { OllamaClient } from '../embed/ollama'
 import { Blocklist } from '../ingest/blocklist'
+import { PdsBlocklist } from '../ingest/pds-blocklist'
 import { TabAdmin } from '../ingest/tab-admin'
 import { LexiconRegistry } from '../lexicon/registry'
 import type { FetchFn } from '../webhooks/worker'
@@ -22,6 +23,8 @@ export interface ApiDeps {
   fetchFn?: FetchFn
   /** Shared DID deny-list (LAB-47). Defaults to an empty in-memory list. */
   blocklist?: Blocklist
+  /** Shared PDS deny-list (LAB-48). Defaults to an empty in-memory list. */
+  pdsBlocklist?: PdsBlocklist
   /** Disables API authentication entirely. Local development only. */
   devMode?: boolean
 }
@@ -34,7 +37,7 @@ export interface ApiDeps {
  *
  * Bearer-authed unless devMode.
  */
-export function createApp({ db, config, ollama, constellation, lexicons, tabAdmin, fetchFn, blocklist, devMode }: ApiDeps): Hono {
+export function createApp({ db, config, ollama, constellation, lexicons, tabAdmin, fetchFn, blocklist, pdsBlocklist, devMode }: ApiDeps): Hono {
   const app = new Hono()
 
   app.get('/health', (c) => c.json({ ok: true }))
@@ -43,6 +46,7 @@ export function createApp({ db, config, ollama, constellation, lexicons, tabAdmi
   const lexiconRegistry = lexicons ?? new LexiconRegistry(db)
   const tab = tabAdmin ?? new TabAdmin(undefined)
   const denyList = blocklist ?? new Blocklist()
+  const pdsDenyList = pdsBlocklist ?? new PdsBlocklist(db)
 
   const xrpc = new Hono()
   if (devMode) {
@@ -52,7 +56,7 @@ export function createApp({ db, config, ollama, constellation, lexicons, tabAdmi
   }
   xrpc.route(
     '/',
-    xrpcRoutes({ db, ollama, config, constellation: constellationClient, lexicons: lexiconRegistry, tab, fetchFn, blocklist: denyList }),
+    xrpcRoutes({ db, ollama, config, constellation: constellationClient, lexicons: lexiconRegistry, tab, fetchFn, blocklist: denyList, pdsBlocklist: pdsDenyList }),
   )
   app.route('/xrpc', xrpc)
 

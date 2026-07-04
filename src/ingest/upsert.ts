@@ -29,15 +29,19 @@ type Tx = Db | Parameters<Parameters<Db['transaction']>[0]>[0]
  * Safe under at-least-once redelivery: an event with a rev not newer
  * than the stored row is a no-op.
  */
+export interface ApplyOptions {
+  /** Drop a DID's event before archiving — DID blocklist ∪ PDS blocklist (LAB-47/48). */
+  skipDid?: (did: string) => boolean
+}
+
 export async function applyEvent(
   tx: Tx,
   config: ObeliskConfig,
   event: RecordEvent,
-  /** DIDs to never archive (LAB-47) — a blocked repo's events are dropped here. */
-  blocked?: Set<string>,
+  opts: ApplyOptions = {},
 ): Promise<UpsertResult> {
   if (event.type !== 'record') return 'skipped'
-  if (blocked?.has(event.did)) return 'skipped'
+  if (opts.skipDid?.(event.did)) return 'skipped'
 
   const existing = await tx
     .select({ id: records.id, rev: records.rev, cid: records.cid, deletedAt: records.deletedAt })

@@ -21,6 +21,7 @@ import {
 import { localInteractionCount } from '../../ranking/interactions'
 import type { RankingProfile } from '../../ranking/config'
 import type { Blocklist } from '../../ingest/blocklist'
+import type { PdsBlocklist } from '../../ingest/pds-blocklist'
 import { computeFacets, highlightExpr, type FacetBucket } from '../routes/search-enrich'
 
 const NSID_RE = /^[a-z][a-z0-9-]*(\.[a-z0-9-]+)+\.[a-zA-Z][a-zA-Z0-9]*$/
@@ -68,6 +69,8 @@ export interface XrpcDeps {
   fetchFn?: FetchFn
   /** Shared DID deny-list (LAB-47). */
   blocklist: Blocklist
+  /** Shared PDS deny-list (LAB-48). */
+  pdsBlocklist: PdsBlocklist
 }
 
 export function xrpcRoutes(deps: XrpcDeps): Hono {

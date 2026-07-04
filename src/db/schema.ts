@@ -221,6 +221,22 @@ export const blockedDids = pgTable('blocked_dids', {
 
 export type BlockedDidRow = typeof blockedDids.$inferSelect
 
+export const blockedPdses = pgTable('blocked_pdses', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  // Glob pattern over the PDS URL, e.g. https://*.pds.host.
+  pattern: text('pattern').notNull().unique(),
+  note: text('note'),
+  addedAt: timestamp('added_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export type BlockedPdsRow = typeof blockedPdses.$inferSelect
+
+export const didPds = pgTable('did_pds', {
+  did: varchar('did', { length: 255 }).primaryKey(),
+  pds: text('pds'),
+  resolvedAt: timestamp('resolved_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
 export const apiTokens = pgTable('api_tokens', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
   name: varchar('name', { length: 255 }).notNull(),

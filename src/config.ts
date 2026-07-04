@@ -20,6 +20,11 @@ export interface ObeliskConfig {
   rankings?: RankingConfig
   /** Where the `interactions` signal sources counts per collection (LAB-40). Optional. */
   interactionSources?: InteractionSourceConfig
+  /** Identity resolution (LAB-48). Optional. */
+  identity?: {
+    /** TTL for the DID→PDS cache used by the PDS blocklist (default 86400 = 24h). */
+    didPdsCacheTtlSeconds?: number
+  }
   ollama: {
     model: string
     dimensions: number

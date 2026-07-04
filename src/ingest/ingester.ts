@@ -1,6 +1,7 @@
 import type { ObeliskConfig } from '../config'
 import type { Db } from '../db/client'
 import type { Blocklist } from './blocklist'
+import type { PdsBlocklist } from './pds-blocklist'
 import { applyEvent, type RecordEvent } from './upsert'
 
 export interface IngesterOptions {
@@ -44,6 +45,8 @@ export class Ingester {
     options: IngesterOptions = {},
     /** Shared deny-list (LAB-47); blocked DIDs' events are skipped at apply time. */
     private readonly blocklist?: Blocklist,
+    /** Shared PDS deny-list (LAB-48); pre-resolved per batch, skipped at apply time. */
+    private readonly pdsBlocklist?: PdsBlocklist,
   ) {
     this.batchSize = options.batchSize ?? 200
     this.flushMs = options.flushMs ?? 500
@@ -142,13 +145,20 @@ export class Ingester {
   }
 
   private async commitWithRetry(batch: PendingEvent[]): Promise<void> {
+    // Pre-resolve the batch's DIDs against the PDS deny-list (network) OUTSIDE the
+    // transaction, so the per-event skip check stays synchronous. No-op when no
+    // PDS patterns are configured.
+    await this.pdsBlocklist?.ensureDecided(new Set(batch.map((b) => b.event.did)))
+
+    const skipDid = (did: string) =>
+      (this.blocklist?.has(did) ?? false) || (this.pdsBlocklist?.isBlocked(did) ?? false)
+
     let attempt = 0
     for (;;) {
       try {
         await this.db.transaction(async (tx) => {
-          const blocked = this.blocklist?.snapshot()
           for (const { event } of batch) {
-            const result = await applyEvent(tx, this.config, event, blocked)
+            const result = await applyEvent(tx, this.config, event, { skipDid })
             if (result === 'applied') this.stats.applied += 1
             else this.stats.skipped += 1
           }

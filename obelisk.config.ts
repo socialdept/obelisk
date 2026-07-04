@@ -63,4 +63,9 @@ export default {
       // 'app.bsky.feed.like': 'constellation', // a collection we don't archive
     },
   },
+  // Identity resolution (LAB-48). The PDS deny-list resolves each DID's PDS and
+  // caches it in `did_pds` for this long before re-resolving.
+  identity: {
+    didPdsCacheTtlSeconds: 86_400, // 24h
+  },
 } satisfies ObeliskConfig
