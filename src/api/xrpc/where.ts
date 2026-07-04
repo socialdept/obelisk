@@ -50,7 +50,7 @@ export function whereFilters(where: WhereClause): SQL[] | { error: string } {
   return filters
 }
 
-function columnFor(field: string): SQL {
+export function columnFor(field: string): SQL {
   if (field === 'json') return sql`${records.record}::text`
 
   // `record.` forces a JSON path, bypassing system-field shadowing.

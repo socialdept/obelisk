@@ -20,6 +20,7 @@ import {
 } from '../../ranking/compile'
 import { localInteractionCount } from '../../ranking/interactions'
 import type { RankingProfile } from '../../ranking/config'
+import { computeFacets, highlightExpr, type FacetBucket } from '../routes/search-enrich'
 
 const NSID_RE = /^[a-z][a-z0-9-]*(\.[a-z0-9-]+)+\.[a-zA-Z][a-zA-Z0-9]*$/
 const MAX_LIMIT = 100
@@ -34,6 +35,8 @@ interface QueryBody {
   semantic?: boolean
   mode?: 'fts' | 'semantic' | 'hybrid'
   ranking?: string
+  highlight?: boolean
+  facets?: string[]
 }
 
 const RRF_K = 60
@@ -185,9 +188,18 @@ async function searchRecords(
     return xrpcError(c, 400, 'InvalidRequest', `unknown mode: ${mode} (expected fts, semantic, or hybrid)`)
   }
 
-  if (mode === 'hybrid') return hybridSearch(c, db, ollama, config, body, built.filters, limit)
+  // Facets (LAB-42): group counts over the same keyword predicate + filters,
+  // computed once and merged into whichever mode's response is returned.
+  let facets: Record<string, FacetBucket[]> | undefined
+  if (body.facets) {
+    const computed = await computeFacets(db, body.q, built.filters, body.facets)
+    if ('error' in computed) return xrpcError(c, 400, 'InvalidRequest', computed.error)
+    facets = computed.facets
+  }
 
-  if (mode === 'fts' && body.ranking) return rankedSearch(c, db, config, body, built.filters, limit)
+  if (mode === 'hybrid') return hybridSearch(c, db, ollama, config, body, built.filters, limit, facets)
+
+  if (mode === 'fts' && body.ranking) return rankedSearch(c, db, config, body, built.filters, limit, facets)
 
   if (mode === 'semantic' && body.ranking) {
     return xrpcError(c, 400, 'InvalidRequest', 'semantic ranking is not supported yet — use mode "hybrid" (LAB-41)')
@@ -196,9 +208,9 @@ async function searchRecords(
   if (mode === 'semantic') {
     const [queryVector] = await ollama.embed([body.q])
     const vec = JSON.stringify(queryVector)
-    const rows = await db.execute<RecordRowRaw & { distance: number }>(sql`
+    const rows = await db.execute<RecordRowRaw & { distance: number; highlight?: string }>(sql`
       SELECT records.did, records.collection, records.rkey, records.uri, records.cid,
-             records.record, records.indexed_at, t.distance
+             records.record, records.indexed_at, t.distance ${highlightColumn(body)}
       FROM (
         SELECT DISTINCT ON (record_id) record_id, distance
         FROM (
@@ -211,19 +223,19 @@ async function searchRecords(
       ORDER BY t.distance
       LIMIT ${limit}
     `)
-    return c.json({ records: rows.map((row) => ({ ...serialize(row), distance: row.distance })) })
+    return c.json({ records: rows.map((row) => ({ ...serialize(row), distance: row.distance })), ...(facets && { facets }) })
   }
 
-  const rows = await db.execute<RecordRowRaw & { rank: number }>(sql`
+  const rows = await db.execute<RecordRowRaw & { rank: number; highlight?: string }>(sql`
     SELECT did, collection, rkey, uri, cid, record, indexed_at,
-           ts_rank(searchable, websearch_to_tsquery('english', ${body.q})) AS rank
+           ts_rank(searchable, websearch_to_tsquery('english', ${body.q})) AS rank ${highlightColumn(body)}
     FROM records
     WHERE searchable @@ websearch_to_tsquery('english', ${body.q})
       AND ${and(...built.filters)}
     ORDER BY rank DESC
     LIMIT ${limit}
   `)
-  return c.json({ records: rows.map((row) => ({ ...serialize(row), rank: row.rank })) })
+  return c.json({ records: rows.map((row) => ({ ...serialize(row), rank: row.rank })), ...(facets && { facets }) })
 }
 
 /**
@@ -238,11 +250,12 @@ async function rankedSearch(
   body: QueryBody,
   filters: SQL[],
   limit: number,
+  facets?: Record<string, FacetBucket[]>,
 ) {
   const profile = config.rankings?.[body.ranking!]
   if (!profile) return xrpcError(c, 400, 'InvalidRequest', `unknown ranking profile: ${body.ranking}`)
 
-  return runRanked(c, db, body, limit, {
+  return runRanked(c, db, body, limit, facets, {
     profile,
     ctes: sql``,
     from: sql`FROM records`,
@@ -266,6 +279,7 @@ async function hybridSearch(
   body: QueryBody,
   filters: SQL[],
   limit: number,
+  facets?: Record<string, FacetBucket[]>,
 ) {
   const profile = body.ranking ? config.rankings?.[body.ranking] : RELEVANCE_ONLY
   if (!profile) return xrpcError(c, 400, 'InvalidRequest', `unknown ranking profile: ${body.ranking}`)
@@ -300,7 +314,7 @@ async function hybridSearch(
       FROM fts FULL OUTER JOIN vec ON fts.id = vec.id
     ) `
 
-  return runRanked(c, db, body, limit, {
+  return runRanked(c, db, body, limit, facets, {
     profile,
     ctes,
     from: sql`FROM fused JOIN records ON records.id = fused.id`,
@@ -325,7 +339,14 @@ interface RankedQuery {
  * page with the compound `(score, id)` cursor (whose `now` anchor keeps recency
  * scores stable across pages), and serialize with the per-row score.
  */
-async function runRanked(c: XrpcContext, db: Db, body: QueryBody, limit: number, q: RankedQuery) {
+async function runRanked(
+  c: XrpcContext,
+  db: Db,
+  body: QueryBody,
+  limit: number,
+  facets: Record<string, FacetBucket[]> | undefined,
+  q: RankedQuery,
+) {
   let prev: RankingCursor | undefined
   if (body.cursor) {
     const decoded = decodeRankingCursor(body.cursor)
@@ -344,10 +365,11 @@ async function runRanked(c: XrpcContext, db: Db, body: QueryBody, limit: number,
 
   const cursorClause = prev ? rankingCursorFilter(compiled.score, sql`records.id`, prev.score, prev.id) : sql`TRUE`
 
-  const rows = await db.execute<RecordRowRaw & { id: number; score: number }>(sql`
+  const rows = await db.execute<RecordRowRaw & { id: number; score: number; highlight?: string }>(sql`
     ${q.ctes}
     SELECT records.did, records.collection, records.rkey, records.uri, records.cid,
-           records.record, records.indexed_at, records.id AS id, (${compiled.score})::double precision AS score
+           records.record, records.indexed_at, records.id AS id,
+           (${compiled.score})::double precision AS score ${highlightColumn(body)}
     ${q.from}
     WHERE ${q.where} AND ${cursorClause}
     ORDER BY ${compiled.orderBy}
@@ -358,6 +380,7 @@ async function runRanked(c: XrpcContext, db: Db, body: QueryBody, limit: number,
   return c.json({
     records: rows.map((row) => ({ ...serialize(row), score: Number(row.score) })),
     cursor: last ? encodeRankingCursor({ score: Number(last.score), id: last.id, anchorMs }) : undefined,
+    ...(facets && { facets }),
   })
 }
 
@@ -384,7 +407,7 @@ interface RecordRowRaw {
   indexed_at: string | Date
 }
 
-function serialize(row: RecordRowRaw) {
+function serialize(row: RecordRowRaw & { highlight?: string }) {
   return {
     uri: row.uri,
     cid: row.cid,
@@ -392,7 +415,13 @@ function serialize(row: RecordRowRaw) {
     collection: row.collection,
     value: row.record,
     indexedAt: row.indexed_at,
+    ...(row.highlight != null && { highlight: row.highlight }),
   }
+}
+
+/** Optional `ts_headline` column for the SELECT, gated on `highlight`. */
+function highlightColumn(body: QueryBody): SQL {
+  return body.highlight ? sql`, ${highlightExpr(body.q!)} AS highlight` : sql``
 }
 
 function clampLimit(raw: unknown): number {

@@ -103,6 +103,8 @@ curl -X POST "localhost:6060/xrpc/site.standard.document.searchRecords" -d '{"q"
 
 Results carry a per-row `score` and a compound `(score, id)` cursor that carries its own `now` anchor, so ranked pagination stays stable as the clock (and later, counts) move. Unknown profile → `InvalidRequest`. Ranking, like everything else, is **config, not code** — no lexicon baked in.
 
+`searchRecords` also takes `highlight: true` — each result gains a `ts_headline` `highlight` excerpt with `<mark>`-wrapped matches — and `facets: ["collection", "did", …]` — group counts over the same keyword predicate + filters, returned as `{facets: {field: [{value, count}]}}` alongside `records` (one round-trip for a results list + filter sidebar; facet fields resolve through the same `where` DSL). Both work across modes.
+
 `searchRecords` takes a `mode` (`fts` default / `semantic` / `hybrid`). **`hybrid`** (LAB-41) runs both the keyword and vector retrievers and fuses them with Reciprocal Rank Fusion (`Σ 1/(60 + rankᵢ)`) — rank-based, so no `ts_rank`-vs-distance scale tuning — surfacing a doc strong in *either* leg. Hybrid composes with a `ranking` profile: the fused relevance feeds the `relevance` signal, so recency/interactions layer on top (with no profile, it's relevance-only). `where`/collection filters apply to both legs. (`semantic` + `ranking` alone is still deferred — use `hybrid`.)
 
 ### Service plane — `/xrpc/social.dept.obelisk.{verb}`
