@@ -6,17 +6,27 @@ import { records } from '../../db/schema'
  *
  *   { "title": { "contains": "atproto" },          // record field
  *     "did": { "eq": "did:plc:x" },                // system field
+ *     "did": { "nin": ["did:plc:spam"] },          // exclude (server-side mute)
  *     "record.did": { "eq": "did:plc:y" },         // forced record path
  *     "condition": { "in": ["a", "b"] },
  *     "json": { "contains": "nirvana" } }          // whole-record search
  *
- * Operators: eq, contains (case-insensitive), in. Record fields support dot
- * paths (content.$type). A `record.` prefix forces a JSON-path lookup even when
- * the field name collides with a system field (so a record whose own body has a
- * `did`/`uri`/… key stays reachable). Conditions AND together.
+ * Operators: eq, neq, contains (case-insensitive), in, nin. Record fields support
+ * dot paths (content.$type). A `record.` prefix forces a JSON-path lookup even
+ * when the field name collides with a system field (so a record whose own body
+ * has a `did`/`uri`/… key stays reachable). Conditions AND together.
+ *
+ * Negation (neq/nin) includes rows where the field is NULL/absent — column
+ * negation uses IS DISTINCT FROM (null-safe), record-path negation is NOT of a
+ * jsonb containment which is already false (not NULL) for an absent path. Unlike
+ * eq/in, negation isn't GIN-indexable (it's a scan) — fine for a bounded
+ * exclusion list, not for a primary filter.
  */
 
-export type WhereClause = Record<string, { eq?: unknown; contains?: string; in?: unknown[] }>
+export type WhereClause = Record<
+  string,
+  { eq?: unknown; neq?: unknown; contains?: string; in?: unknown[]; nin?: unknown[] }
+>
 
 const SYSTEM_FIELDS: Record<string, SQL> = {
   did: sql`${records.did}`,
@@ -34,7 +44,7 @@ export function whereFilters(where: WhereClause): SQL[] | { error: string } {
 
   for (const [field, condition] of Object.entries(where)) {
     if (condition === null || typeof condition !== 'object') {
-      return { error: `filter for "${field}" must be an object with eq/contains/in` }
+      return { error: `filter for "${field}" must be an object with eq/neq/contains/in/nin` }
     }
 
     const ops = Object.entries(condition)
@@ -84,6 +94,11 @@ function jsonOperator(
     case 'eq':
       if (value === undefined) return { error: `"eq" for "${field}" requires a value` }
       return { sql: containment(parts, value) }
+    case 'neq':
+      // jsonb `@>` is false (not NULL) for an absent/other value, so NOT() is
+      // absent-safe: rows missing the field count as "not equal" and stay in.
+      if (value === undefined) return { error: `"neq" for "${field}" requires a value` }
+      return { sql: sql`NOT (${containment(parts, value)})` }
     case 'in': {
       if (!Array.isArray(value) || value.length === 0) {
         return { error: `"in" for "${field}" requires a non-empty array` }
@@ -91,13 +106,20 @@ function jsonOperator(
       const clauses = value.map((item) => containment(parts, item))
       return { sql: sql`(${sql.join(clauses, sql` OR `)})` }
     }
+    case 'nin': {
+      if (!Array.isArray(value) || value.length === 0) {
+        return { error: `"nin" for "${field}" requires a non-empty array` }
+      }
+      const clauses = value.map((item) => containment(parts, item))
+      return { sql: sql`NOT (${sql.join(clauses, sql` OR `)})` }
+    }
     case 'contains': {
       // Substring match can't use containment/GIN — fall back to extract-text ILIKE.
       if (typeof value !== 'string') return { error: `"contains" for "${field}" requires a string` }
       return { sql: sql`${jsonPath(parts.join('.'))} ILIKE ${'%' + escapeLike(value) + '%'}` }
     }
     default:
-      return { error: `unknown operator "${op}" for "${field}" (supported: eq, contains, in)` }
+      return { error: `unknown operator "${op}" for "${field}" (supported: eq, neq, contains, in, nin)` }
   }
 }
 
@@ -130,6 +152,10 @@ function columnOperator(
   switch (op) {
     case 'eq':
       return { sql: sql`${column} = ${String(value)}` }
+    case 'neq':
+      // IS DISTINCT FROM, not <>, so a NULL column (lang/cid/rev) still counts as
+      // "not equal" and the row stays in.
+      return { sql: sql`${column} IS DISTINCT FROM ${String(value)}` }
     case 'contains': {
       if (typeof value !== 'string') return { error: `"contains" for "${field}" requires a string` }
       return { sql: sql`${column} ILIKE ${'%' + escapeLike(value) + '%'}` }
@@ -141,8 +167,16 @@ function columnOperator(
       const items = sql.join(value.map((item) => sql`${String(item)}`), sql`, `)
       return { sql: sql`${column} IN (${items})` }
     }
+    case 'nin': {
+      if (!Array.isArray(value) || value.length === 0) {
+        return { error: `"nin" for "${field}" requires a non-empty array` }
+      }
+      // AND of IS DISTINCT FROM — null-safe "none of these" (NULL columns kept).
+      const clauses = value.map((item) => sql`${column} IS DISTINCT FROM ${String(item)}`)
+      return { sql: sql`(${sql.join(clauses, sql` AND `)})` }
+    }
     default:
-      return { error: `unknown operator "${op}" for "${field}" (supported: eq, contains, in)` }
+      return { error: `unknown operator "${op}" for "${field}" (supported: eq, neq, contains, in, nin)` }
   }
 }
 

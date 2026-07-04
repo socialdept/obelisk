@@ -101,7 +101,7 @@ holds; the collection plane's write verbs stay `MethodNotImplemented`.
 - **XRPC surface, REST retired** (LAB-33) — the whole HTTP API is atproto-shaped
   XRPC; `/api/v1` is gone. Collection plane
   `/xrpc/{collection}.getRecords|getRecord|countRecords|searchRecords` with a
-  `where` filter DSL (`eq`/`contains`/`in`, record + system fields), `sortBy`,
+  `where` filter DSL (`eq`/`neq`/`contains`/`in`/`nin`, record + system fields), `sortBy`,
   cursor pagination. Service plane `social.dept.obelisk.*` (authority = owned
   domain `dept.social`) carries archive queries **and** management procedures
   (webhooks/audiences/watched-dids as POST procedures — mutating Obelisk's own
