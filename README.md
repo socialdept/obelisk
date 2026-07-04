@@ -118,6 +118,7 @@ Obelisk's own cross-collection / archive operations, under the owned authority `
 | Method | What it does |
 |---|---|
 | `getEvents` | Cursor-paged change log — filters `cursor`, `since`, `until`, `order` (`asc`/`desc`), `collection`, `did`, `action`, `audience`, `feed`, `link.*`, `record.*`, `include_record` |
+| `subscribeEvents` | **SSE live tail** of the change log — same filters as `getEvents`, replay from `cursor` (0 = all history) then push new events (`event:` frames, `id:` = cursor, resumable via `Last-Event-ID`). Obelisk as a filtered firehose; backpressure by construction |
 | `getTypes?collection=&path=` | Inventory of `$type` values observed in the archive, by path, with counts |
 | `getType?nsid=` | Usage + resolved lexicon schema + derived text fields + observed union members |
 | `getLinks?uri=` | Outgoing AT Proto references extracted from a record |
@@ -147,6 +148,7 @@ Obelisk's own cross-collection / archive operations, under the owned authority `
 
 ```bash
 curl -H "$A" "localhost:6060/xrpc/social.dept.obelisk.getEvents?cursor=0&collection=site.standard.document"
+curl -N -H "$A" "localhost:6060/xrpc/social.dept.obelisk.subscribeEvents?cursor=0&collection=site.standard.document"  # live SSE tail
 curl -X POST -H "$A" "localhost:6060/xrpc/social.dept.obelisk.backfillEvents" -d '{"collection": "site.standard.document"}'
 curl -H "$A" "localhost:6060/xrpc/social.dept.obelisk.getFootprint?did=did:plc:…&includeDeleted=1"
 curl -H "$A" "localhost:6060/xrpc/social.dept.obelisk.getBackfillStatus?collection=site.standard.document"

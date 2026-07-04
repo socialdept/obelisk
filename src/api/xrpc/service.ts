@@ -24,6 +24,7 @@ import {
 } from '../../webhooks/manage'
 import { runAggregate, type AggregateInput } from '../routes/aggregate'
 import { rankedFeed, type RankedFeedInput } from '../routes/feed'
+import { subscribeEvents } from '../routes/subscribe'
 import { backfillStatus } from '../backfill'
 import { backfillEvents, queryEvents } from '../routes/events'
 import { getRecordLinks, queryBacklinks, queryNetworkBacklinks } from '../routes/links'
@@ -69,6 +70,8 @@ export function handleServiceMethod(verb: string, c: XrpcContext, deps: ServiceD
     // ── queries ──────────────────────────────────────────────
     case 'getEvents':
       return getEvents(c, deps)
+    case 'subscribeEvents':
+      return subscribeEvents(c, deps.db, deps.config)
     case 'getTypes':
       return getTypes(c, deps)
     case 'getType':

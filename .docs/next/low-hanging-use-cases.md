@@ -51,7 +51,7 @@ consumer resolve, or revisit a small resolve-and-cache. Not a blocker.
 
 ---
 
-## 3. Live event tail — SSE / WebSocket over `getEvents` (effort: moderate)
+## 3. Live event tail — SSE / WebSocket over `getEvents` (effort: moderate) — ✅ SHIPPED (LAB-45, SSE)
 
 **Idea:** a streaming endpoint that **pushes** applied changes with the same
 filters `getEvents` already takes (`collection`, `did`, `audience`, `feed`,
