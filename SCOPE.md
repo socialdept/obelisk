@@ -73,6 +73,12 @@ holds; the collection plane's write verbs stay `MethodNotImplemented`.
 - Backfill progress (`getBackfillStatus`, LAB-34) — read off the event log via
   Tab's `live:false→true` cutover; drain-based `complete`. No `%`-of-network:
   no atproto service exposes a per-collection count (`reposTotal` stays null).
+- Generic aggregation/stats (`aggregate`, LAB-36) — grouped counts over
+  records/events/links (one source per call, joined to `records` so the same
+  `where` DSL applies). `groupBy` = source field / `record.<path>` / time bucket
+  (`date_trunc`, allowlisted); `count`/`count_distinct`. Interaction counts,
+  subscriber growth, activity-over-time — all composed generically, none named
+  in code. Group-by/agg expressions are whitelisted; no raw SQL, no migration.
 - DID-scoped backfill (`scripts/backfill-repo.ts`, LAB-28) — one-shot full-repo
   import via `com.atproto.sync.getRepo`, every collection, through the existing
   `applyEvent` path (`@atcute/repo` CAR reader, Bun-native). Idempotent via the
@@ -89,10 +95,6 @@ holds; the collection plane's write verbs stay `MethodNotImplemented`.
   domain `dept.social`) carries archive queries **and** management procedures
   (webhooks/audiences/watched-dids as POST procedures — mutating Obelisk's own
   DB, never a PDS).
-- **Generic aggregation/stats endpoints** — counts and group-bys over
-  records/links/events with the same filter vocabulary (interaction counts,
-  subscriber growth, activity over time). `countRecords` + `where` covers the
-  record-counting slice of this.
 
 ## In scope — phase 2 (roadmap, sequenced after real usage)
 

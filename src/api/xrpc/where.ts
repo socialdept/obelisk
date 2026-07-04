@@ -62,7 +62,8 @@ function columnFor(field: string): SQL {
   return jsonPath(field)
 }
 
-function jsonPath(path: string): SQL {
+/** jsonb_extract_path_text over the record body for a dot path (parts parameterized). */
+export function jsonPath(path: string): SQL {
   const parts = path.split('.')
   const args = sql.join(parts.map((part) => sql`${part}`), sql`, `)
   return sql`jsonb_extract_path_text(${records.record}, ${args})`

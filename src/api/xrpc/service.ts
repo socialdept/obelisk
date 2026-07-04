@@ -22,6 +22,7 @@ import {
   updateWebhook,
   type ManageResult,
 } from '../../webhooks/manage'
+import { runAggregate, type AggregateInput } from '../routes/aggregate'
 import { backfillStatus } from '../backfill'
 import { backfillEvents, queryEvents } from '../routes/events'
 import { getRecordLinks, queryBacklinks, queryNetworkBacklinks } from '../routes/links'
@@ -54,7 +55,7 @@ export interface ServiceDeps {
  * span collections or concern the archive itself. Two verb kinds:
  *
  *   • queries    (GET)  — reads: events, type inventory, link graph, footprint,
- *                         and management list/get.
+ *                         grouped aggregates, and management list/get.
  *   • procedures (POST) — mutations against Obelisk's OWN Postgres (webhooks,
  *                         audiences, watched DIDs, event backfill). This never
  *                         writes to a PDS — hard-boundary #2 is intact.
@@ -79,6 +80,8 @@ export function handleServiceMethod(verb: string, c: XrpcContext, deps: ServiceD
       return getNetworkBacklinks(c, deps)
     case 'getFootprint':
       return getFootprint(c, deps)
+    case 'aggregate':
+      return aggregate(c, deps)
     case 'getBackfillStatus':
       return getBackfillStatus(c, deps)
     case 'getWebhooks':
@@ -222,6 +225,31 @@ async function getFootprint(c: XrpcContext, { db }: ServiceDeps) {
       limit: numParam(c.req.query('limit')),
     }),
   )
+}
+
+/**
+ * Grouped aggregate over records/events/links. GET carries scalar params
+ * (`groupBy` comma-separated); POST carries the full input including the `where`
+ * DSL in the body — parity with the collection plane's where-in-body queries.
+ */
+async function aggregate(c: XrpcContext, { db }: ServiceDeps) {
+  return respond(c, runAggregate(db, await aggregateInput(c)))
+}
+
+async function aggregateInput(c: XrpcContext): Promise<AggregateInput> {
+  if (c.req.method === 'POST') return ((await c.req.json().catch(() => ({}))) ?? {}) as AggregateInput
+
+  const groupBy = c.req.query('groupBy')
+  return {
+    source: c.req.query('source') as AggregateInput['source'],
+    groupBy: groupBy ? groupBy.split(',').map((s) => s.trim()) : undefined,
+    aggregate: c.req.query('aggregate'),
+    since: c.req.query('since'),
+    until: c.req.query('until'),
+    orderBy: c.req.query('orderBy'),
+    limit: numParam(c.req.query('limit')),
+    includeDeleted: c.req.query('includeDeleted') === '1',
+  }
 }
 
 async function getBackfillStatus(c: XrpcContext, { db }: ServiceDeps) {

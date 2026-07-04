@@ -104,6 +104,7 @@ Obelisk's own cross-collection / archive operations, under the owned authority `
 | `getBacklinks?uri=&collection=&path=` | Records in the archive that reference a target |
 | `getNetworkBacklinks?uri=&collection=&path=&count=` | Network-wide backlinks via Constellation (cached, serve-stale) |
 | `getFootprint?did=&includeDeleted=&cursor=&limit=` | Everything for a DID across every collection: counts-by-collection (with deleted breakdown) + a unified timeline |
+| `aggregate?source=&groupBy=&aggregate=&since=&until=&orderBy=&limit=` | Grouped counts over `records` (default) / `events` / `links`. `groupBy` (comma-separated) accepts a source field, a `record.<path>`, or a time bucket `<timeDim>:<hour\|day\|week\|month\|year>`; `aggregate` is `count` (default) or `count_distinct:<field>`. Returns `{groups: [{key, count}]}`. POST the same shape with a `where` body for the full filter DSL |
 | `getBackfillStatus?collection=&window=` | Backfill progress for a collection (omit `collection` for all) — records archived, repos seen/caught-up, backfill vs live ingest rate, and a drain-based `complete` flag |
 | `getWebhooks` / `getWebhook?id=` | List / fetch push subscriptions |
 | `getAudiences` / `getAudience?name=` | List / fetch query-defined DID sets |
@@ -128,6 +129,9 @@ curl -H "$A" "localhost:6060/xrpc/social.dept.obelisk.getEvents?cursor=0&collect
 curl -X POST -H "$A" "localhost:6060/xrpc/social.dept.obelisk.backfillEvents" -d '{"collection": "site.standard.document"}'
 curl -H "$A" "localhost:6060/xrpc/social.dept.obelisk.getFootprint?did=did:plc:…&includeDeleted=1"
 curl -H "$A" "localhost:6060/xrpc/social.dept.obelisk.getBackfillStatus?collection=site.standard.document"
+curl -H "$A" "localhost:6060/xrpc/social.dept.obelisk.aggregate?groupBy=collection"
+curl -H "$A" "localhost:6060/xrpc/social.dept.obelisk.aggregate?source=events&groupBy=createdAt:day&since=2026-01-01T00:00:00Z"
+curl -X POST -H "$A" "localhost:6060/xrpc/social.dept.obelisk.aggregate" -d '{"source": "links", "groupBy": "targetCollection", "where": {"did": {"eq": "did:plc:…"}}}'
 curl -X POST -H "$A" "localhost:6060/xrpc/social.dept.obelisk.addWatchedDid" -d '{"did": "did:plc:…"}'
 ```
 
