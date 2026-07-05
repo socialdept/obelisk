@@ -1,0 +1,159 @@
+# Scope
+
+What Obelisk is, what it will become, and what it refuses to be. When a
+feature idea shows up, it gets tested against this file before it gets an
+issue.
+
+## Mission
+
+A **self-hostable, lexicon-generic, queryable archive** of AT Protocol
+records. Applications (first consumer: Offprint) point it at collections,
+then query and subscribe over an authenticated HTTP API. App-specific
+behavior lives in **config and data** (collection lists, audiences, record
+matchers, feed definitions) — never in Obelisk code.
+
+Reference point for the shape we're aiming at:
+[slices](https://tangled.org/slices.network/slices) — "host your own
+AppView" — minus the write path, plus search/vectors/webhooks/link-graph.
+
+## Hard boundaries
+
+1. **Lexicon-generic, always.** Behavior derives from published lexicon
+   schemas; where derivation can't work, there's a config extension point a
+   third party could fill; otherwise the feature doesn't ship. Standard.site
+   is default config, not a code assumption. (See README "Design principle".)
+2. **Read-only.** Obelisk archives and serves the network — it never
+   writes records to PDSes. Write paths belong to the consuming app (e.g.
+   Offprint via `socialdept/atp-client`). No OAuth-as-a-user, no CRUD.
+3. **Single self-hostable unit.** One Bun process + Postgres + Tab. Features
+   that require additional always-on infrastructure need an exceptional
+   justification.
+
+## API planes
+
+Two request planes, split by one invariant:
+
+> In the **collection plane**, `{collection}` is always the collection of the
+> records being *returned / counted / searched*.
+
+1. **Collection plane** — `/xrpc/{collection}.{verb}`, where `{collection}` is
+   the archived collection being queried (it borrows that lexicon's own NSID,
+   owned by whoever authored it). Verbs: `getRecords`, `getRecord`,
+   `countRecords`, `searchRecords`. All queries; write verbs return
+   `MethodNotImplemented`.
+2. **Service plane** — `/xrpc/social.dept.obelisk.{verb}` for Obelisk's own
+   operations that span collections or concern the archive itself (authority =
+   owned domain `dept.social`). Following atproto's own split, it has both
+   **queries (GET)** — `getEvents`, `getTypes`, `getType`, `getLinks`,
+   `getBacklinks`, `getNetworkBacklinks`, `getFootprint`, plus management
+   list/get — and **procedures (POST)** — `createWebhook`/`updateWebhook`/…,
+   `createAudience`/…, `addWatchedDid`/… Keyed by `uri`/params, not by a
+   collection in the method name.
+
+Anything that breaks the invariant (spans collections, or is about the archive)
+lives in the service plane — never jammed into `{collection}.{verb}`.
+
+**There is no REST plane.** The entire HTTP surface is XRPC. Management is
+expressed as service-plane **procedures**, not CRUD routes. Procedures mutate
+Obelisk's *own* Postgres only — this never writes to a PDS, so hard boundary #2
+holds; the collection plane's write verbs stay `MethodNotImplemented`.
+
+## In scope — shipped
+
+- Sync (Tab, ack-batched, idempotent, soft deletes) and the permanent archive
+- Query API: records, `record.<path>`/`link.<path>` filters, FTS, semantic
+  search, internal links/backlinks, cached Constellation network backlinks
+- Type inventory + lexicon registry (`getTypes`), lexicon-derived extraction
+- Event log + cursor pull API (`getEvents`: `since`/`until` time bounds, `asc`/`desc`
+  ordering — "when did publications we maintain change their records"), batched HMAC webhooks
+- Event backfill (`backfillEvents`, LAB-18) — seed synthetic `create`/`delete` events for
+  archived records that predate the log, so a `cursor=start` consumer sees history it
+  otherwise misses. Idempotent (`NOT EXISTS` guard), `live:false` marks them historical.
+- Audiences (backlink / outlink / collection / static) and following feeds
+- Backfill progress (`getBackfillStatus`, LAB-34) — read off the event log via
+  Tab's `live:false→true` cutover; drain-based `complete`. No `%`-of-network:
+  no atproto service exposes a per-collection count (`reposTotal` stays null).
+- Generic aggregation/stats (`aggregate`, LAB-36) — grouped counts over
+  records/events/links (one source per call, joined to `records` so the same
+  `where` DSL applies). `groupBy` = source field / `record.<path>` / time bucket
+  (`date_trunc`, allowlisted); `count`/`count_distinct`. Interaction counts,
+  subscriber growth, activity-over-time — all composed generically, none named
+  in code. Group-by/agg expressions are whitelisted; no raw SQL, no migration.
+- Ranking substrate + serving adapters (LAB-37 epic) — a config-defined
+  **linear-sum score** (`relevance` FTS/vector · `interactions` inbound-link
+  popularity · `recency` decay) compiled to one `ORDER BY` with an anchor-stable
+  compound cursor (LAB-38). Interaction counts live in a `target_uri`-keyed
+  rollup maintained off ingest (LAB-39), sourced per collection **local vs
+  Constellation** (consumed + backfilled → local, else network backlinks;
+  LAB-40). `searchRecords` gains `mode: hybrid` (RRF fusion of FTS + vector,
+  LAB-41) and a `ranking` param; `getRankedFeed` (LAB-44) serves a
+  `{feed:[{post}],cursor}` skeleton over the **authenticated** plane — the
+  consuming app relays it into its own feed generator, Obelisk exposes no public
+  feed-gen endpoint. Lexicon-generic: interaction specs + profiles are config.
+- DID-scoped backfill (`scripts/backfill-repo.ts`, LAB-28) — one-shot full-repo
+  import via `com.atproto.sync.getRepo`, every collection, through the existing
+  `applyEvent` path (`@atcute/repo` CAR reader, Bun-native). Idempotent via the
+  commit `rev`; stamps `watched_dids.snapshot_at`. The footprint-audit primitive.
+- DID deny-list (`addBlockedDid`/`removeBlockedDid`/`getBlockedDids`, LAB-47) —
+  a shared in-memory blocklist the ingester consults, so a blocked repo's events
+  arrive from Tab but are never archived (global, archive-side). Optional
+  `purge` (soft-delete existing) / `purge+force` (hard-delete). Complements the
+  query-time `neq`/`nin` per-consumer mute (LAB-46). A deny mirror of watched-DIDs.
+- PDS deny-list (`addBlockedPds`/`removeBlockedPds`/`getBlockedPdses`, LAB-48) —
+  block an entire PDS by wildcard pattern (`https://*.pds.host`). Events carry
+  only the DID, so each DID's PDS is resolved (reusing `resolvePds`, cached in
+  `did_pds` on a configurable TTL) and matched; the ingester pre-resolves a
+  batch's DIDs so the per-event skip stays sync. Future-block only; resolution
+  failure → archived (allow).
+- Production hardening for VPS deployment (LAB-49 epic) — the single self-hostable
+  unit, made internet-safe without leaving the single-unit boundary: containerized
+  full stack (`Dockerfile` + app/ollama compose services) behind **Caddy** for
+  auto-TLS (prod overlay); per-identity **rate limiting** + request-body caps +
+  request/DB timeouts (LAB-52); required prod DB password, fail-fast env
+  validation, dev-mode refused on a non-loopback bind (LAB-53); `/healthz` +
+  `/readyz` + authenticated `/metrics` + structured JSON logging (LAB-54); scripted
+  `pg_dump`/restore + backup runbook (LAB-55); graceful degradation when
+  Ollama/Constellation blip (LAB-56); streamed repo backfill so a large DID can't
+  OOM a small box (LAB-57); operator [deployment runbook](.docs/deployment/vps.md)
+  (LAB-58). Acceptance validated by the LAB-9 VPS stress test.
+- Dev mode, bearer-token auth
+
+## In scope — now (closes the stated consumer needs)
+
+- **XRPC surface, REST retired** (LAB-33) — the whole HTTP API is atproto-shaped
+  XRPC; `/api/v1` is gone. Collection plane
+  `/xrpc/{collection}.getRecords|getRecord|countRecords|searchRecords` with a
+  `where` filter DSL (`eq`/`neq`/`contains`/`in`/`nin`, record + system fields), `sortBy`,
+  cursor pagination. Service plane `social.dept.obelisk.*` (authority = owned
+  domain `dept.social`) carries archive queries **and** management procedures
+  (webhooks/audiences/watched-dids as POST procedures — mutating Obelisk's own
+  DB, never a PDS).
+
+## In scope — phase 2 (roadmap, sequenced after real usage)
+
+- Audience combinators, `active`/threshold kinds, 2-hop graph audiences
+  (LAB-21–24) — the recommendation/counting roadmap
+- Webhook 413 handling (LAB-19),
+  GIN-indexed JSON filters (LAB-11)
+- VPS stress test + minimum-viable-box verdict (LAB-9)
+
+## Out of scope
+
+- **Write operations of any kind** (see hard boundary 2)
+- **App-specific endpoints or logic** — if a feature can't be expressed
+  generically, the consuming app builds it on top of the query API
+- **The Laravel consumer package** (LAB-17) — separate deliverable, its own
+  repo, tracked in Labs
+- **UI/admin frontend** — API-first; hosting a browsing UI is a different
+  project
+- **Identity/handle resolution as a product feature** — store DIDs; consumers
+  resolve handles (revisit only if a consumer need makes it unavoidable)
+- **Being an AppView SDK platform** (slices' lexicon-authoring + SDK
+  generation) — Obelisk consumes lexicons, it doesn't author them
+
+## How to use this file
+
+New idea → which bucket? If "out of scope," it doesn't get an issue. If
+"phase 2," it gets an issue but not a start date. If it fits "now," it must
+name the consumer need it closes. Scope changes edit this file first, in the
+same commit as the decision.

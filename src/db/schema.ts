@@ -2,11 +2,13 @@ import { sql } from 'drizzle-orm'
 import {
   bigint,
   bigserial,
+  boolean,
   customType,
   index,
   integer,
   jsonb,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -34,8 +36,12 @@ export const records = pgTable(
     searchable: tsvector('searchable').generatedAlwaysAs(
       sql`setweight(to_tsvector('english', coalesce(record->>'title', record->>'name', '')), 'A') || setweight(to_tsvector('english', coalesce(record->>'description', '')), 'B') || setweight(to_tsvector('english', coalesce(record->>'textContent', '')), 'C')`,
     ),
+    // Detected content language (ISO code); drives the FTS config per row (LAB-43).
+    lang: varchar('lang', { length: 20 }),
     embedStatus: varchar('embed_status', { length: 20 }).notNull().default('skipped'),
     embedAttempts: integer('embed_attempts').notNull().default(0),
+    extractedTitle: text('extracted_title'),
+    extractedText: text('extracted_text'),
     indexedAt: timestamp('indexed_at', { withTimezone: true }).notNull().defaultNow(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
@@ -82,6 +88,63 @@ export const recordLinks = pgTable(
   ],
 )
 
+export const recordTypes = pgTable(
+  'record_types',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    recordId: bigint('record_id', { mode: 'number' })
+      .notNull()
+      .references(() => records.id, { onDelete: 'cascade' }),
+    path: varchar('path', { length: 500 }).notNull(),
+    nsid: varchar('nsid', { length: 255 }).notNull(),
+  },
+  (table) => [
+    uniqueIndex('record_types_record_path_nsid_key').on(table.recordId, table.path, table.nsid),
+    index('record_types_nsid_idx').on(table.nsid),
+    index('record_types_path_nsid_idx').on(table.path, table.nsid),
+  ],
+)
+
+export const lexiconSchemas = pgTable('lexicon_schemas', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  nsid: varchar('nsid', { length: 255 }).notNull().unique(),
+  schema: jsonb('schema'),
+  error: text('error'),
+  resolvedAt: timestamp('resolved_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const events = pgTable(
+  'events',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    recordId: bigint('record_id', { mode: 'number' })
+      .notNull()
+      .references(() => records.id, { onDelete: 'cascade' }),
+    did: varchar('did', { length: 255 }).notNull(),
+    collection: varchar('collection', { length: 255 }).notNull(),
+    rkey: varchar('rkey', { length: 255 }).notNull(),
+    action: varchar('action', { length: 20 }).notNull(),
+    rev: varchar('rev', { length: 255 }),
+    live: boolean('live').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('events_collection_id_idx').on(table.collection, table.id),
+    index('events_did_id_idx').on(table.did, table.id),
+  ],
+)
+
+export const interactionCounts = pgTable(
+  'interaction_counts',
+  {
+    targetUri: text('target_uri').notNull(),
+    // "<source_collection>:<path>" — e.g. "app.bsky.feed.like:subject.uri".
+    kind: varchar('kind', { length: 511 }).notNull(),
+    count: bigint('count', { mode: 'number' }).notNull().default(0),
+  },
+  (table) => [primaryKey({ columns: [table.targetUri, table.kind] })],
+)
+
 export const constellationCache = pgTable('constellation_cache', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
   cacheKey: varchar('cache_key', { length: 64 }).notNull().unique(),
@@ -91,6 +154,87 @@ export const constellationCache = pgTable('constellation_cache', {
   path: varchar('path', { length: 500 }),
   response: jsonb('response').notNull(),
   fetchedAt: timestamp('fetched_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const audiences = pgTable('audiences', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  name: varchar('name', { length: 255 }).notNull().unique(),
+  definition: jsonb('definition').notNull().$type<AudienceDefinition>(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export type AudienceDefinition =
+  | { kind: 'backlink'; target: string; collection?: string; path?: string }
+  | { kind: 'outlink'; did: string; collection?: string; path?: string }
+  | { kind: 'collection'; collection: string; matchers?: Record<string, string> }
+  | { kind: 'static'; dids: string[] }
+
+export type AudienceRow = typeof audiences.$inferSelect
+
+export const webhookSubscriptions = pgTable('webhook_subscriptions', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  name: varchar('name', { length: 255 }).notNull().unique(),
+  url: text('url').notNull(),
+  secret: varchar('secret', { length: 64 }).notNull(),
+  collections: jsonb('collections').notNull().default([]).$type<string[]>(),
+  actions: jsonb('actions').notNull().default([]).$type<string[]>(),
+  recordMatchers: jsonb('record_matchers').notNull().default({}).$type<Record<string, string>>(),
+  includeRecord: boolean('include_record').notNull().default(true),
+  maxEvents: integer('max_events').notNull().default(200),
+  maxWaitMs: integer('max_wait_ms').notNull().default(5000),
+  cursor: bigint('cursor', { mode: 'number' }).notNull().default(0),
+  audience: varchar('audience', { length: 255 }),
+  feed: varchar('feed', { length: 500 }),
+  status: varchar('status', { length: 20 }).notNull().default('active'),
+  failureCount: integer('failure_count').notNull().default(0),
+  nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).notNull().defaultNow(),
+  lastDeliveryAt: timestamp('last_delivery_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export type WebhookSubscription = typeof webhookSubscriptions.$inferSelect
+
+export const watchedDids = pgTable(
+  'watched_dids',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    did: varchar('did', { length: 255 }).notNull().unique(),
+    note: text('note'),
+    // null = the whole repo (all collections); an array scopes to those NSIDs.
+    collections: jsonb('collections').$type<string[] | null>(),
+    active: boolean('active').notNull().default(true),
+    // null until getRepo backfill completes; bounds "deleted" coverage for this DID.
+    snapshotAt: timestamp('snapshot_at', { withTimezone: true }),
+    addedAt: timestamp('added_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index('watched_dids_active_idx').on(table.active)],
+)
+
+export type WatchedDidRow = typeof watchedDids.$inferSelect
+
+export const blockedDids = pgTable('blocked_dids', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  did: varchar('did', { length: 255 }).notNull().unique(),
+  note: text('note'),
+  addedAt: timestamp('added_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export type BlockedDidRow = typeof blockedDids.$inferSelect
+
+export const blockedPdses = pgTable('blocked_pdses', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  // Glob pattern over the PDS URL, e.g. https://*.pds.host.
+  pattern: text('pattern').notNull().unique(),
+  note: text('note'),
+  addedAt: timestamp('added_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export type BlockedPdsRow = typeof blockedPdses.$inferSelect
+
+export const didPds = pgTable('did_pds', {
+  did: varchar('did', { length: 255 }).primaryKey(),
+  pds: text('pds'),
+  resolvedAt: timestamp('resolved_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
 export const apiTokens = pgTable('api_tokens', {

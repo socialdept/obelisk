@@ -38,7 +38,7 @@ describe('applyEvent', () => {
     expect(row!.deletedAt).toBeNull()
   })
 
-  test('non-embeddable collection gets skipped embed status', async () => {
+  test('every collection is queued for extraction — the worker decides prose from the lexicon', async () => {
     const event = makeEvent({
       collection: 'site.standard.graph.subscription',
       record: { publication: 'at://did:plc:pub/site.standard.publication/p1' },
@@ -46,7 +46,7 @@ describe('applyEvent', () => {
     await applyEvent(db, testConfig, event)
 
     const row = await getRecord(event.did, event.collection, event.rkey)
-    expect(row!.embedStatus).toBe('skipped')
+    expect(row!.embedStatus).toBe('pending')
   })
 
   test('redelivered event (same rev) is a no-op', async () => {
@@ -160,12 +160,12 @@ describe('applyEvent', () => {
     expect(result).toBe('skipped')
   })
 
-  test('unknown collections are archived without embedding', async () => {
+  test('unknown collections are archived and queued like any other', async () => {
     const event = makeEvent({ collection: 'com.example.unknown', record: { note: 'did:plc:someone' } })
     const result = await applyEvent(db, testConfig, event)
 
     expect(result).toBe('applied')
     const row = await getRecord(event.did, 'com.example.unknown', event.rkey)
-    expect(row!.embedStatus).toBe('skipped')
+    expect(row!.embedStatus).toBe('pending')
   })
 })

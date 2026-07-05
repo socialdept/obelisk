@@ -1,9 +1,25 @@
-import { Hono } from 'hono'
-import { and, desc, eq, isNull, lt, type SQL } from 'drizzle-orm'
-import type { Db } from '../../db/client'
+import { eq, isNull, type SQL } from 'drizzle-orm'
 import { records } from '../../db/schema'
+import { containment } from '../xrpc/where'
 
 const MAX_LIMIT = 100
+
+/**
+ * Equality filters against record JSON, e.g. { "content.$type": "app.offprint.content" }.
+ * Uses jsonb containment so the single GIN index serves them (LAB-11).
+ */
+export function jsonMatcherFilters(matchers: Record<string, string>): SQL[] {
+  return Object.entries(matchers).map(([path, value]) => containment(path.split('.'), value))
+}
+
+/** Same, sourced from `record.<path>=<value>` query params. */
+export function recordJsonFilters(query: Record<string, string>): SQL[] {
+  const matchers: Record<string, string> = {}
+  for (const [key, value] of Object.entries(query)) {
+    if (key.startsWith('record.')) matchers[key.slice('record.'.length)] = value
+  }
+  return jsonMatcherFilters(matchers)
+}
 
 export function recordFilters(query: {
   did?: string
@@ -21,10 +37,15 @@ export function recordFilters(query: {
   return filters
 }
 
+/** Parse a positive-integer limit; `fallback` on missing/invalid, capped at `max`. */
+export function clampLimit(raw: unknown, fallback: number, max: number): number {
+  const limit = Number(raw ?? fallback)
+  if (!Number.isInteger(limit) || limit < 1) return fallback
+  return Math.min(limit, max)
+}
+
 export function parseLimit(raw: string | undefined): number {
-  const limit = Number(raw ?? 50)
-  if (!Number.isInteger(limit) || limit < 1) return 50
-  return Math.min(limit, MAX_LIMIT)
+  return clampLimit(raw, 50, MAX_LIMIT)
 }
 
 export function serializeRecord(row: typeof records.$inferSelect) {
@@ -39,46 +60,4 @@ export function serializeRecord(row: typeof records.$inferSelect) {
     indexedAt: row.indexedAt,
     deletedAt: row.deletedAt,
   }
-}
-
-export function recordsRoutes(db: Db): Hono {
-  const app = new Hono()
-
-  app.get('/', async (c) => {
-    const query = c.req.query()
-    const filters = recordFilters(query)
-    const limit = parseLimit(query.limit)
-
-    if (query.cursor) {
-      const cursorId = Number(Buffer.from(query.cursor, 'base64').toString())
-      if (Number.isInteger(cursorId)) filters.push(lt(records.id, cursorId))
-    }
-
-    const rows = await db
-      .select()
-      .from(records)
-      .where(and(...filters))
-      .orderBy(desc(records.id))
-      .limit(limit)
-
-    const last = rows.at(-1)
-    return c.json({
-      records: rows.map(serializeRecord),
-      cursor: rows.length === limit && last ? Buffer.from(String(last.id)).toString('base64') : null,
-    })
-  })
-
-  app.get('/:did/:collection/:rkey', async (c) => {
-    const { did, collection, rkey } = c.req.param()
-    const filters = [eq(records.did, did), eq(records.collection, collection), eq(records.rkey, rkey)]
-    if (c.req.query('include_deleted') !== '1') filters.push(isNull(records.deletedAt))
-
-    const rows = await db.select().from(records).where(and(...filters)).limit(1)
-    const row = rows[0]
-    if (!row) return c.json({ error: 'record not found' }, 404)
-
-    return c.json({ record: serializeRecord(row) })
-  })
-
-  return app
 }

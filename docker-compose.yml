@@ -1,24 +1,38 @@
+# Full self-hostable stack: postgres + tab + ollama + the Obelisk app.
+# `docker compose up -d` brings the whole thing up. For a public VPS, put Caddy
+# (docker-compose.prod.yml) in front for TLS and keep the app on loopback.
+#
+# Secrets come from .env — copy .env.example and set POSTGRES_PASSWORD. The
+# `:-obelisk` fallbacks keep local dev one-command; production must set them
+# (see LAB-53 / the deployment runbook).
+
 services:
   postgres:
     image: pgvector/pgvector:pg17
+    restart: unless-stopped
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     environment:
-      POSTGRES_DB: reservoir
-      POSTGRES_USER: reservoir
-      POSTGRES_PASSWORD: reservoir
+      POSTGRES_DB: obelisk
+      POSTGRES_USER: obelisk
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-obelisk}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U reservoir"]
+      test: ["CMD-SHELL", "pg_isready -U obelisk"]
       interval: 5s
       timeout: 3s
       retries: 10
+    deploy:
+      resources:
+        limits:
+          memory: 768M
 
   tab:
     image: fatfingers23/tab:latest
+    restart: unless-stopped
     ports:
-      - "2480:2480"
+      - "127.0.0.1:2480:2480"
     environment:
       TAB_DATABASE_URL: sqlite:///data/tab.db
       TAB_LIGHT_RAIL_URL: https://lightrail.microcosm.blue
@@ -26,7 +40,54 @@ services:
       TAB_COLLECTION_FILTERS: site.standard.*
     volumes:
       - tabdata:/data
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    # Not exposed to the host — only the app talks to it over the compose network.
+    expose:
+      - "11434"
+    volumes:
+      - ollamadata:/root/.ollama
+    deploy:
+      resources:
+        limits:
+          # nomic-embed-text CPU inference; tune against the LAB-9 box verdict.
+          memory: 2G
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Bind to loopback only — the reverse proxy (Caddy) is the public entrypoint.
+    ports:
+      - "127.0.0.1:6060:6060"
+    env_file: .env
+    environment:
+      # Container networking overrides the host-oriented URLs in .env.
+      DATABASE_URL: postgres://obelisk:${POSTGRES_PASSWORD:-obelisk}@postgres:5432/obelisk
+      TAB_WS_URL: ws://tab:2480
+      OLLAMA_URL: http://ollama:11434
+      PORT: "6060"
+    healthcheck:
+      # bun is in the image; no curl/wget needed.
+      test: ["CMD", "bun", "-e", "fetch('http://localhost:6060/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
 
 volumes:
   pgdata: {}
   tabdata: {}
+  ollamadata: {}

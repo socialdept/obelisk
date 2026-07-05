@@ -3,6 +3,13 @@ import { eq } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { apiTokens } from '../db/schema'
 
+// The resolved token id — the rate limiter keys per-token off this (LAB-52).
+declare module 'hono' {
+  interface ContextVariableMap {
+    tokenId: number
+  }
+}
+
 export function hashToken(token: string): string {
   return new Bun.CryptoHasher('sha256').update(token).digest('hex')
 }
@@ -18,6 +25,7 @@ export function bearerAuth(db: Db) {
     const rows = await db.select({ id: apiTokens.id }).from(apiTokens).where(eq(apiTokens.tokenHash, tokenHash))
     const token = rows[0]
     if (!token) return c.json({ error: 'invalid token' }, 401)
+    c.set('tokenId', token.id)
 
     // Fire-and-forget usage stamp; not worth blocking the request.
     db.update(apiTokens)

@@ -1,12 +1,12 @@
 import postgres from 'postgres'
 import { createDb, type Db } from '../src/db/client'
 import { migrate } from '../src/db/migrate'
-import type { ReservoirConfig } from '../src/config'
+import type { ObeliskConfig } from '../src/config'
 import type { RecordEvent } from '../src/ingest/upsert'
 
-const ADMIN_URL = process.env.TEST_ADMIN_DATABASE_URL ?? 'postgres://reservoir:reservoir@localhost:5432/reservoir'
+const ADMIN_URL = process.env.TEST_ADMIN_DATABASE_URL ?? 'postgres://obelisk:obelisk@localhost:5432/obelisk'
 export const TEST_DATABASE_URL =
-  process.env.TEST_DATABASE_URL ?? 'postgres://reservoir:reservoir@localhost:5432/reservoir_test'
+  process.env.TEST_DATABASE_URL ?? 'postgres://obelisk:obelisk@localhost:5432/obelisk_test'
 
 export async function setupTestDb(): Promise<{ db: Db; teardown: () => Promise<void> }> {
   const admin = postgres(ADMIN_URL, { max: 1, onnotice: () => {} })
@@ -24,11 +24,13 @@ export async function setupTestDb(): Promise<{ db: Db; teardown: () => Promise<v
 export async function truncateAll(db: Db): Promise<void> {
   const { sql } = await import('drizzle-orm')
   await db.execute(
-    sql.raw('TRUNCATE records, record_embeddings, record_links, constellation_cache, api_tokens RESTART IDENTITY CASCADE'),
+    sql.raw(
+      'TRUNCATE records, record_embeddings, record_links, interaction_counts, blocked_dids, blocked_pdses, did_pds, constellation_cache, api_tokens RESTART IDENTITY CASCADE',
+    ),
   )
 }
 
-export const testConfig: ReservoirConfig = {
+export const testConfig: ObeliskConfig = {
   collections: {
     'site.standard.document': { textFields: ['title', 'description', 'textContent'] },
     'site.standard.publication': { textFields: ['name', 'description'] },
@@ -36,7 +38,28 @@ export const testConfig: ReservoirConfig = {
     'site.standard.graph.recommend': {},
   },
   ollama: { model: 'nomic-embed-text', dimensions: 768, chunkChars: 1800, chunkOverlap: 200 },
-  constellation: { baseUrl: 'https://constellation.example', ttlSeconds: 3600, userAgent: 'reservoir-test' },
+  constellation: { baseUrl: 'https://constellation.example', ttlSeconds: 3600, userAgent: 'obelisk-test' },
+  feeds: { following: { collection: 'site.standard.graph.subscription', path: 'publication' } },
+  rankings: {
+    recent: { signals: [{ kind: 'recency', weight: 1, field: 'indexedAt', halfLifeHours: 24 }] },
+    'relevant-fresh': {
+      signals: [
+        { kind: 'relevance', weight: 1 },
+        { kind: 'recency', weight: 0.5, field: 'indexedAt', halfLifeHours: 24 },
+      ],
+    },
+    engaged: {
+      signals: [
+        {
+          kind: 'interactions',
+          weight: 2,
+          transform: 'log1p',
+          links: [{ collection: 'site.standard.graph.recommend', path: 'document', weight: 1 }],
+        },
+        { kind: 'recency', weight: 1, field: 'indexedAt', halfLifeHours: 24 },
+      ],
+    },
+  },
 }
 
 let tidCounter = 0

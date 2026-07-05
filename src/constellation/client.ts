@@ -1,9 +1,11 @@
 import { eq } from 'drizzle-orm'
-import type { ReservoirConfig } from '../config'
+import type { ObeliskConfig } from '../config'
 import type { Db } from '../db/client'
 import { constellationCache } from '../db/schema'
 
 export type ConstellationEndpoint = 'links' | 'links/count' | 'links/all/count'
+
+const DEFAULT_TIMEOUT_MS = 8000
 
 export interface ConstellationParams {
   target: string
@@ -27,7 +29,7 @@ export interface ConstellationResult {
 export class ConstellationClient {
   constructor(
     private readonly db: Db,
-    private readonly config: ReservoirConfig['constellation'],
+    private readonly config: ObeliskConfig['constellation'],
   ) {}
 
   async query(endpoint: ConstellationEndpoint, params: ConstellationParams): Promise<ConstellationResult> {
@@ -75,7 +77,12 @@ export class ConstellationClient {
     if (params.path) url.searchParams.set('path', params.path)
     if (params.cursor) url.searchParams.set('cursor', params.cursor)
 
-    const response = await fetch(url, { headers: { 'User-Agent': this.config.userAgent } })
+    // Bounded so a hung upstream can't pile up requests — on timeout the fetch
+    // rejects and query() serves the stale cache row (or surfaces a 502).
+    const response = await fetch(url, {
+      headers: { 'User-Agent': this.config.userAgent },
+      signal: AbortSignal.timeout(this.config.timeoutMs ?? DEFAULT_TIMEOUT_MS),
+    })
     if (!response.ok) {
       throw new Error(`constellation ${endpoint} failed: ${response.status} ${await response.text()}`)
     }

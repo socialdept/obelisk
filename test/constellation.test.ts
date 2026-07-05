@@ -56,7 +56,7 @@ describe('ConstellationClient', () => {
     const first = await c.query('links', PARAMS)
     expect(first.cached).toBe(false)
     expect(fetchCalls).toHaveLength(1)
-    expect(fetchCalls[0]!.userAgent).toBe('reservoir-test')
+    expect(fetchCalls[0]!.userAgent).toBe('obelisk-test')
     expect(fetchCalls[0]!.url).toContain('collection=site.standard.graph.subscription')
 
     const second = await c.query('links', PARAMS)
