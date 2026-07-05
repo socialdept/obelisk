@@ -217,8 +217,9 @@ async function searchRecords(
   }
 
   if (mode === 'semantic') {
-    const [queryVector] = await ollama.embed([body.q])
-    const vec = JSON.stringify(queryVector)
+    const embedded = await embedQuery(ollama, body.q)
+    if ('error' in embedded) return xrpcError(c, 503, 'ServiceUnavailable', embedded.error)
+    const vec = JSON.stringify(embedded.vector)
     const rows = await db.execute<RecordRowRaw & { distance: number; highlight?: string }>(sql`
       SELECT records.did, records.collection, records.rkey, records.uri, records.cid,
              records.record, records.indexed_at, t.distance ${highlightColumn(body)}
@@ -295,8 +296,9 @@ async function hybridSearch(
   const profile = body.ranking ? config.rankings?.[body.ranking] : RELEVANCE_ONLY
   if (!profile) return xrpcError(c, 400, 'InvalidRequest', `unknown ranking profile: ${body.ranking}`)
 
-  const [queryVector] = await ollama.embed([body.q!])
-  const vec = JSON.stringify(queryVector)
+  const embedded = await embedQuery(ollama, body.q!)
+  if ('error' in embedded) return xrpcError(c, 503, 'ServiceUnavailable', embedded.error)
+  const vec = JSON.stringify(embedded.vector)
   const q = body.q!
 
   // Two ranked legs → RRF-fused relevance, filters applied inside each leg.
@@ -332,6 +334,21 @@ async function hybridSearch(
     where: sql`TRUE`,
     relevance: sql`fused.relevance`,
   })
+}
+
+/**
+ * Embed a query vector, turning an Ollama outage into a clean result instead of
+ * a thrown 500 (LAB-56). The caller maps the error to a 503 so `mode: fts` keeps
+ * working while the embedding backend is down.
+ */
+async function embedQuery(ollama: OllamaClient, q: string): Promise<{ vector: number[] } | { error: string }> {
+  try {
+    const [vector] = await ollama.embed([q])
+    if (!vector) return { error: 'semantic search unavailable: embedding backend returned no vector' }
+    return { vector }
+  } catch {
+    return { error: 'semantic search unavailable: embedding backend unreachable' }
+  }
 }
 
 /** An implicit profile for hybrid search with no explicit ranking: relevance only. */

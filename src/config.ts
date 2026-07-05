@@ -36,6 +36,8 @@ export interface ObeliskConfig {
     baseUrl: string
     ttlSeconds: number
     userAgent: string
+    /** Upstream request timeout in ms (LAB-56). Default 8000. */
+    timeoutMs?: number
   }
   /** Semantics for feed=following:<did> — which records express "following" and via which link path. */
   feeds: {

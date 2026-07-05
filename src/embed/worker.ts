@@ -12,6 +12,8 @@ import { logger } from '../log'
 import type { OllamaClient } from './ollama'
 
 const MAX_ATTEMPTS = 3
+const OLLAMA_BACKOFF_BASE_MS = 2000
+const OLLAMA_BACKOFF_MAX_MS = 60_000
 const log = logger('embed')
 
 export type ExtractionResolver = (collection: string) => Promise<CollectionExtraction>
@@ -38,6 +40,8 @@ export class EmbedWorker {
   private stopped = false
   private loopPromise: Promise<void> | null = null
   private lastError: string | null = null
+  /** Consecutive Ollama-backend failures — drives backoff and the degraded signal. */
+  private ollamaFailures = 0
 
   constructor(
     private readonly db: Db,
@@ -69,9 +73,13 @@ export class EmbedWorker {
     await this.loopPromise
   }
 
-  /** Health snapshot (LAB-54): `down` once stopped, else `up`. */
+  /**
+   * Health snapshot (LAB-54/56): the worker loop is `up` whenever it's running —
+   * an Ollama outage is surfaced by the separate `ollama` component (degraded),
+   * not here. `ollamaFailures` exposes how long it's been backing off.
+   */
   status(): ComponentStatus {
-    return { status: this.stopped ? 'down' : 'up', lastError: this.lastError }
+    return { status: this.stopped ? 'down' : 'up', ollamaFailures: this.ollamaFailures, lastError: this.lastError }
   }
 
   private async loop(): Promise<void> {
@@ -81,7 +89,16 @@ export class EmbedWorker {
         log.error('tick failed', { err })
         return 0
       })
-      if (processed === 0) await Bun.sleep(this.idleMs)
+
+      // Ollama unreachable → exponential backoff so a down backend isn't hammered
+      // and CPU isn't burned. Records stay `pending` and drain when it returns.
+      if (this.ollamaFailures > 0) {
+        const backoff = Math.min(OLLAMA_BACKOFF_BASE_MS * 2 ** (this.ollamaFailures - 1), OLLAMA_BACKOFF_MAX_MS)
+        log.warn('ollama unreachable, backing off', { failures: this.ollamaFailures, backoffMs: backoff })
+        await Bun.sleep(backoff)
+      } else if (processed === 0) {
+        await Bun.sleep(this.idleMs)
+      }
     }
   }
 
@@ -96,13 +113,17 @@ export class EmbedWorker {
     `)
     if (claimed.length === 0) return 0
 
+    let processed = 0
     for (const { id } of claimed) {
-      await this.embedRecord(id)
+      // Bail the whole batch the moment Ollama is unreachable — no point trying
+      // the rest; the loop backs off and re-claims them next round.
+      if ((await this.embedRecord(id)) === 'ollama-down') break
+      processed += 1
     }
-    return claimed.length
+    return processed
   }
 
-  private async embedRecord(recordId: number): Promise<void> {
+  private async embedRecord(recordId: number): Promise<'ok' | 'skipped' | 'ollama-down'> {
     const row = await this.db
       .select({
         id: records.id,
@@ -114,11 +135,11 @@ export class EmbedWorker {
       .from(records)
       .where(eq(records.id, recordId))
       .then((rows) => rows[0])
-    if (!row) return
+    if (!row) return 'skipped'
 
     if (row.deletedAt) {
       await this.setStatus(recordId, 'skipped')
-      return
+      return 'skipped'
     }
 
     const recordJson = row.record as Record<string, unknown>
@@ -132,14 +153,25 @@ export class EmbedWorker {
 
     if (text === '') {
       await this.setStatus(recordId, 'skipped')
-      return
+      return 'skipped'
     }
 
     const chunks = chunkText(text, this.config.ollama)
 
+    // Embedding is the one call that can fail because the *backend* is down, as
+    // opposed to a bad record. Keep it separate: an Ollama failure must NOT burn
+    // the record's attempts (else an outage would permanently fail the archive).
+    let vectors: number[][]
     try {
-      const vectors = await this.ollama.embed(chunks)
+      vectors = await this.ollama.embed(chunks)
+    } catch (err) {
+      this.ollamaFailures += 1
+      this.lastError = err instanceof Error ? err.message : String(err)
+      return 'ollama-down' // record stays pending; drains when Ollama returns
+    }
+    this.ollamaFailures = 0 // a success clears the backoff
 
+    try {
       await this.db.transaction(async (tx) => {
         await tx.delete(recordEmbeddings).where(eq(recordEmbeddings.recordId, recordId))
         await tx.insert(recordEmbeddings).values(
@@ -159,7 +191,9 @@ export class EmbedWorker {
           })
           .where(eq(records.id, recordId))
       })
+      return 'ok'
     } catch (err) {
+      // A genuine per-record failure (bad data / DB write) — count attempts.
       const attempts = row.attempts + 1
       const status = attempts >= MAX_ATTEMPTS ? 'failed' : 'pending'
       log.error('record embed failed', { recordId, attempts, err })
@@ -168,6 +202,7 @@ export class EmbedWorker {
         .set({ embedStatus: status, embedAttempts: attempts })
         .where(eq(records.id, recordId))
       if (status === 'pending') await Bun.sleep(1000)
+      return 'ok'
     }
   }
 
