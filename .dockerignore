@@ -1,0 +1,14 @@
+node_modules
+.env
+.git
+.gitignore
+.docs
+test
+*.log
+.DS_Store
+.idea
+dist
+.plan.md
+IMPLEMENTATION_PLAN.md
+Dockerfile
+.dockerignore

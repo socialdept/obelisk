@@ -40,7 +40,9 @@ export interface ApiDeps {
 export function createApp({ db, config, ollama, constellation, lexicons, tabAdmin, fetchFn, blocklist, pdsBlocklist, devMode }: ApiDeps): Hono {
   const app = new Hono()
 
+  // Liveness — cheap, unauthenticated. `/readyz` (dependency checks) lands in LAB-54.
   app.get('/health', (c) => c.json({ ok: true }))
+  app.get('/healthz', (c) => c.json({ ok: true }))
 
   const constellationClient = constellation ?? new ConstellationClient(db, config.constellation)
   const lexiconRegistry = lexicons ?? new LexiconRegistry(db)
