@@ -248,7 +248,18 @@ Following semantics (which collection/link path expresses "following") are confi
 
 ### Dev mode
 
-`OBELISK_DEV_MODE=true` disables API auth entirely (loud warning at boot). Local development only.
+`OBELISK_DEV_MODE=true` disables API auth entirely (loud warning at boot). Local development only. Boot **refuses** it when the server binds a non-loopback interface unless `OBELISK_ALLOW_INSECURE=true`.
+
+## Backups
+
+The Postgres volume is Obelisk's only source of truth — an archive with no backup is a contradiction. Tab's sqlite state is regenerable (it re-syncs) and doesn't need backing up.
+
+```bash
+./scripts/backup.sh                       # timestamped pg_dump -Fc → ./backups, prunes to BACKUP_KEEP (14)
+./scripts/restore.sh backups/<file>.dump  # stop app first: docker compose stop app
+```
+
+Schedule the backup from host cron (`0 3 * * * cd /srv/obelisk && ./scripts/backup.sh`), and copy `./backups` off-box. Restore recovers to the last dump; anything newer re-ingests from the network idempotently. See the [deployment runbook](.docs/deployment/vps.md) for the full procedure.
 
 ## Status
 
