@@ -76,6 +76,9 @@ export function metricsText(report: ReadyReport): string {
   const gauge = (name: string, value: number, help: string) => {
     lines.push(`# HELP ${name} ${help}`, `# TYPE ${name} gauge`, `${name} ${value}`)
   }
+  const counter = (name: string, value: number, help: string) => {
+    lines.push(`# HELP ${name} ${help}`, `# TYPE ${name} counter`, `${name} ${value}`)
+  }
   const bit = (b: boolean) => (b ? 1 : 0)
 
   gauge('obelisk_ready', bit(report.ok), 'Whether the service is ready (no critical dependency down)')
@@ -87,6 +90,12 @@ export function metricsText(report: ReadyReport): string {
   if (c.embedQueue) {
     gauge('obelisk_embed_pending', Number(c.embedQueue.pending ?? 0), 'Records awaiting embedding')
     gauge('obelisk_embed_failed', Number(c.embedQueue.failed ?? 0), 'Records that exhausted embed attempts')
+  }
+  if (c.embedWorker) {
+    // Monotonic since boot → rate() gives embeds/sec. Pairs with embed_pending (backlog).
+    counter('obelisk_embeds_completed_total', Number(c.embedWorker.completed ?? 0), 'Records embedded since boot')
+    counter('obelisk_embeds_skipped_total', Number(c.embedWorker.skipped ?? 0), 'Records skipped (no text / deleted) since boot')
+    gauge('obelisk_embed_backoff', Number(c.embedWorker.embedFailures ?? 0), 'Consecutive embed-backend failures (backoff level)')
   }
   if (c.ingester) {
     gauge('obelisk_ingester_connected', bit(Boolean(c.ingester.connected)), 'Ingester websocket connected to Tab')

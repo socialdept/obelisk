@@ -40,8 +40,11 @@ export class EmbedWorker {
   private stopped = false
   private loopPromise: Promise<void> | null = null
   private lastError: string | null = null
-  /** Consecutive Ollama-backend failures — drives backoff and the degraded signal. */
+  /** Consecutive backend failures — drives backoff and the degraded signal. */
   private embedFailures = 0
+  /** Cumulative counters (monotonic since boot) for /metrics rate tracking. */
+  private embedsCompleted = 0
+  private embedsSkipped = 0
 
   constructor(
     private readonly db: Db,
@@ -79,7 +82,13 @@ export class EmbedWorker {
    * not here. `embedFailures` exposes how long it's been backing off.
    */
   status(): ComponentStatus {
-    return { status: this.stopped ? 'down' : 'up', embedFailures: this.embedFailures, lastError: this.lastError }
+    return {
+      status: this.stopped ? 'down' : 'up',
+      embedFailures: this.embedFailures,
+      completed: this.embedsCompleted,
+      skipped: this.embedsSkipped,
+      lastError: this.lastError,
+    }
   }
 
   private async loop(): Promise<void> {
@@ -126,6 +135,9 @@ export class EmbedWorker {
     const allDown = !anyEmbedded && results.some((r) => r === 'backend-down')
     if (allDown) this.embedFailures += 1
     else if (anyEmbedded) this.embedFailures = 0
+
+    this.embedsCompleted += results.filter((r) => r === 'ok').length
+    this.embedsSkipped += results.filter((r) => r === 'skipped').length
 
     return results.filter((r) => r !== 'backend-down').length
   }
