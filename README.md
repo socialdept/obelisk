@@ -261,6 +261,19 @@ The Postgres volume is Obelisk's only source of truth — an archive with no bac
 
 Schedule the backup from host cron (`0 3 * * * cd /srv/obelisk && ./scripts/backup.sh`), and copy `./backups` off-box. Restore recovers to the last dump; anything newer re-ingests from the network idempotently. See the [deployment runbook](.docs/deployment/vps.md) for the full procedure.
 
+## Production (VPS)
+
+Obelisk runs as a **single self-hostable unit** behind Caddy for TLS. The whole stack — Postgres, Tab, Ollama, and the app — comes up with one command; Caddy issues a Let's Encrypt cert for `OBELISK_DOMAIN` and reverse-proxies to the app (bound to loopback, never directly exposed).
+
+```bash
+cp .env.example .env          # set POSTGRES_PASSWORD (openssl rand -hex 32) + OBELISK_DOMAIN
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+docker compose exec ollama ollama pull nomic-embed-text
+docker compose exec app bun run scripts/create-token.ts my-consumer   # token shown once
+```
+
+Hardened for internet exposure: bearer-token auth (dev-mode refuses to boot on a public bind), per-identity **rate limiting** + request-body caps + timeouts, `/healthz` + `/readyz` probes and authenticated `/metrics`, structured JSON logs, graceful degradation when Ollama/Constellation blip, and scripted `pg_dump`/restore. Full step-by-step (firewall, DNS, monitoring, upgrades, rollback, security notes) in the **[deployment runbook](.docs/deployment/vps.md)**.
+
 ## Status
 
 ✅ **Viable** (2026-07-02) — the full pipeline works end to end against the live network:

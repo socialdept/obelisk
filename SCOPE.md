@@ -105,6 +105,17 @@ holds; the collection plane's write verbs stay `MethodNotImplemented`.
   `did_pds` on a configurable TTL) and matched; the ingester pre-resolves a
   batch's DIDs so the per-event skip stays sync. Future-block only; resolution
   failure → archived (allow).
+- Production hardening for VPS deployment (LAB-49 epic) — the single self-hostable
+  unit, made internet-safe without leaving the single-unit boundary: containerized
+  full stack (`Dockerfile` + app/ollama compose services) behind **Caddy** for
+  auto-TLS (prod overlay); per-identity **rate limiting** + request-body caps +
+  request/DB timeouts (LAB-52); required prod DB password, fail-fast env
+  validation, dev-mode refused on a non-loopback bind (LAB-53); `/healthz` +
+  `/readyz` + authenticated `/metrics` + structured JSON logging (LAB-54); scripted
+  `pg_dump`/restore + backup runbook (LAB-55); graceful degradation when
+  Ollama/Constellation blip (LAB-56); streamed repo backfill so a large DID can't
+  OOM a small box (LAB-57); operator [deployment runbook](.docs/deployment/vps.md)
+  (LAB-58). Acceptance validated by the LAB-9 VPS stress test.
 - Dev mode, bearer-token auth
 
 ## In scope — now (closes the stated consumer needs)
