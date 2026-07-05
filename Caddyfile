@@ -1,0 +1,24 @@
+# TLS termination + reverse proxy for Obelisk. Caddy fetches and renews a
+# Let's Encrypt cert for $OBELISK_DOMAIN automatically and redirects HTTP→HTTPS.
+# The app listens plain HTTP on the compose network (app:6060); it is never
+# exposed to the host beyond loopback (see docker-compose.yml).
+
+{$OBELISK_DOMAIN} {
+	encode zstd gzip
+
+	header {
+		# HSTS: force HTTPS for a year, subdomains included.
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		# Don't advertise the server software.
+		-Server
+	}
+
+	reverse_proxy app:6060 {
+		# flush_interval -1 disables response buffering so the SSE live tail
+		# (social.dept.obelisk.subscribeEvents, LAB-45) streams in real time.
+		flush_interval -1
+	}
+}

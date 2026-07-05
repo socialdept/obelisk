@@ -1,0 +1,32 @@
+# Production overlay: adds Caddy in front for automatic HTTPS.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# Requires OBELISK_DOMAIN in .env, its A record pointed at this box, and ports
+# 80/443 open (Caddy needs 80 for the ACME challenge). The app stays on
+# 127.0.0.1:6060 from the base compose; Caddy reaches it as `app:6060` over the
+# compose network, so it is never directly reachable from the internet.
+
+services:
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      OBELISK_DOMAIN: ${OBELISK_DOMAIN:?set OBELISK_DOMAIN in .env for TLS}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+      - caddyconfig:/config
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+volumes:
+  caddydata: {}
+  caddyconfig: {}
