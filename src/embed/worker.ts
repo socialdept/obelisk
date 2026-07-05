@@ -118,11 +118,14 @@ export class EmbedWorker {
     // provider, where each record is a network call. claimSize bounds the fan-out.
     const results = await Promise.all(claimed.map(({ id }) => this.embedRecord(id)))
 
-    // Failure accounting once per tick (not per record) so a concurrent batch
-    // doesn't over-count: a down backend bumps the backoff by one; a real embed
-    // clears it.
-    if (results.some((r) => r === 'backend-down')) this.embedFailures += 1
-    else if (results.some((r) => r === 'ok')) this.embedFailures = 0
+    // Failure accounting once per tick (not per record). Only back off when the
+    // WHOLE batch failed — that signals the backend is actually down. An isolated
+    // transient failure amid successes (common at concurrency) must NOT stall the
+    // drain: those records simply stay `pending` and are re-claimed next tick.
+    const anyEmbedded = results.some((r) => r === 'ok')
+    const allDown = !anyEmbedded && results.some((r) => r === 'backend-down')
+    if (allDown) this.embedFailures += 1
+    else if (anyEmbedded) this.embedFailures = 0
 
     return results.filter((r) => r !== 'backend-down').length
   }

@@ -10,6 +10,13 @@ export interface OpenAIOptions {
 }
 
 const REQUEST_TIMEOUT_MS = 30_000
+const MAX_ATTEMPTS = 2
+const RETRY_DELAY_MS = 500
+
+/** Transient HTTP statuses worth a quick retry (rate limit / upstream blips). */
+function isTransient(status: number): boolean {
+  return status === 429 || status >= 500
+}
 
 /**
  * OpenAI-compatible embeddings driver (LAB-9). Offloads inference off the box,
@@ -35,30 +42,50 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
   async embed(inputs: string[]): Promise<number[][]> {
     if (inputs.length === 0) return []
 
-    const response = await fetch(`${this.baseUrl}/embeddings`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${this.apiKey}`,
-      },
-      body: JSON.stringify({ model: this.model, input: inputs, dimensions: this.dimensions }),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    })
+    const body = JSON.stringify({ model: this.model, input: inputs, dimensions: this.dimensions })
 
-    if (!response.ok) {
-      throw new Error(`openai embed failed: ${response.status} ${await response.text()}`)
+    // Retry transient failures once (429 / 5xx / connection resets — common at
+    // concurrency), so a blip re-tries in place instead of bouncing the record
+    // back to the queue.
+    let lastError: unknown
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+      try {
+        const response = await fetch(`${this.baseUrl}/embeddings`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this.apiKey}` },
+          body,
+          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        })
+
+        if (!response.ok) {
+          const text = await response.text()
+          if (attempt < MAX_ATTEMPTS - 1 && isTransient(response.status)) {
+            await Bun.sleep(RETRY_DELAY_MS)
+            continue
+          }
+          throw new Error(`openai embed failed: ${response.status} ${text}`)
+        }
+
+        const parsed = (await response.json()) as { data?: { index: number; embedding: number[] }[] }
+        if (!Array.isArray(parsed.data) || parsed.data.length !== inputs.length) {
+          throw new Error(`openai returned ${parsed.data?.length ?? 0} embeddings for ${inputs.length} inputs`)
+        }
+        // The API may return items out of order — sort by `index` to realign with inputs.
+        return parsed.data
+          .slice()
+          .sort((a, b) => a.index - b.index)
+          .map((d) => d.embedding)
+      } catch (err) {
+        // Network-level errors (reset/timeout) — retry once, then give up.
+        lastError = err
+        if (attempt < MAX_ATTEMPTS - 1 && !(err instanceof Error && err.message.startsWith('openai embed failed'))) {
+          await Bun.sleep(RETRY_DELAY_MS)
+          continue
+        }
+        throw err
+      }
     }
-
-    const body = (await response.json()) as { data?: { index: number; embedding: number[] }[] }
-    if (!Array.isArray(body.data) || body.data.length !== inputs.length) {
-      throw new Error(`openai returned ${body.data?.length ?? 0} embeddings for ${inputs.length} inputs`)
-    }
-
-    // The API may return items out of order — sort by `index` to realign with inputs.
-    return body.data
-      .slice()
-      .sort((a, b) => a.index - b.index)
-      .map((d) => d.embedding)
+    throw lastError
   }
 
   async health(): Promise<ComponentStatus> {

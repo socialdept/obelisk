@@ -78,6 +78,36 @@ describe('embed worker — concurrency', () => {
     )
     expect(Number(done[0]!.n)).toBe(6)
   })
+
+  test('an isolated failure in a batch does not stall the rest or trigger backoff', async () => {
+    await applyEvent(db, testConfig, makeEvent({ did: 'did:plc:d', rkey: 'ok1' }))
+    await applyEvent(db, testConfig, makeEvent({ did: 'did:plc:d', rkey: 'ok2' }))
+    await applyEvent(db, testConfig, makeEvent({
+      did: 'did:plc:d',
+      rkey: 'boom',
+      record: { $type: 'site.standard.document', title: 'BOOM', textContent: 'BOOM' },
+    }))
+    await applyEvent(db, testConfig, makeEvent({ did: 'did:plc:d', rkey: 'ok3' }))
+
+    // One record's text blows up the backend; the rest embed fine.
+    const embedder = {
+      embed: async (inputs: string[]) => {
+        if (inputs.some((c) => c.includes('BOOM'))) throw new Error('connection reset')
+        return inputs.map(() => new Array(768).fill(0))
+      },
+    } as unknown as OllamaClient
+    const worker = new EmbedWorker(db, testConfig, embedder, { claimSize: 10 })
+
+    const processed = await worker.tick()
+    expect(processed).toBe(3) // 3 embedded, 1 failed
+    expect(worker.status().embedFailures).toBe(0) // no backoff — the batch mostly succeeded
+
+    const rows = await db.execute<{ rkey: string; embed_status: string }>(
+      sql`SELECT rkey, embed_status FROM records WHERE did = 'did:plc:d'`,
+    )
+    expect(rows.find((r) => r.rkey === 'boom')!.embed_status).toBe('pending') // stays queued for retry
+    expect(rows.filter((r) => r.embed_status === 'done')).toHaveLength(3)
+  })
 })
 
 describe('semantic search — Ollama down', () => {

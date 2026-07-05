@@ -64,6 +64,37 @@ describe('OpenAIEmbeddingProvider', () => {
     await expect(provider.embed(['x'])).rejects.toThrow(/openai embed failed: 401/)
   })
 
+  test('retries a transient 5xx once, then succeeds', async () => {
+    let calls = 0
+    stubFetch(() => {
+      calls += 1
+      if (calls === 1) return new Response('upstream connect error', { status: 503 })
+      return new Response(JSON.stringify({ data: [{ index: 0, embedding: [7] }] }), { status: 200 })
+    })
+    expect(await provider.embed(['x'])).toEqual([[7]])
+    expect(calls).toBe(2)
+  })
+
+  test('gives up after a persistent 5xx', async () => {
+    let calls = 0
+    stubFetch(() => {
+      calls += 1
+      return new Response('down', { status: 503 })
+    })
+    await expect(provider.embed(['x'])).rejects.toThrow(/openai embed failed: 503/)
+    expect(calls).toBe(2) // one retry, then throws
+  })
+
+  test('does not retry a 4xx (non-transient)', async () => {
+    let calls = 0
+    stubFetch(() => {
+      calls += 1
+      return new Response('bad key', { status: 401 })
+    })
+    await expect(provider.embed(['x'])).rejects.toThrow(/401/)
+    expect(calls).toBe(1)
+  })
+
   test('throws when the count does not match the inputs', async () => {
     stubFetch(() => new Response(JSON.stringify({ data: [{ index: 0, embedding: [1] }] }), { status: 200 }))
     await expect(provider.embed(['a', 'b'])).rejects.toThrow(/returned 1 embeddings for 2 inputs/)
