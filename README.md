@@ -181,7 +181,7 @@ Archive a DID's **entire repo across every collection** — independent of the n
 bun run scripts/backfill-repo.ts did:plc:…
 ```
 
-Every record is stamped with the repo's commit `rev`, so the import is **idempotent** (re-run = no-op) and a newer live event always wins over the snapshot — a forward delete is never resurrected. Records land `embed_status='pending'`; the running app's embed worker fills embeddings for the ones with prose. If the DID is in `watched_dids`, `snapshot_at` is stamped on success (the "deleted coverage starts here" bound `getFootprint` reports). The CAR is parsed with `@atcute/repo` (Bun-native; `@atproto/repo` pulls a `@noble/hashes` export Bun can't resolve). Large repos are buffered in memory — fine for typical repos; a streaming reader is the next step if that bites.
+Every record is stamped with the repo's commit `rev`, so the import is **idempotent** (re-run = no-op) and a newer live event always wins over the snapshot — a forward delete is never resurrected. Records land `embed_status='pending'`; the running app's embed worker fills embeddings for the ones with prose. If the DID is in `watched_dids`, `snapshot_at` is stamped on success (the "deleted coverage starts here" bound `getFootprint` reports). The CAR is **streamed** and parsed incrementally with `@atcute/repo`'s `fromStream` (Bun-native; `@atproto/repo` pulls a `@noble/hashes` export Bun can't resolve), so memory stays bounded regardless of repo size — a large DID won't OOM a small box (LAB-57). The commit `rev` comes from a cheap `com.atproto.sync.getLatestCommit` call, since the streamed reader consumes the commit block internally.
 
 ### Filtering by record content
 

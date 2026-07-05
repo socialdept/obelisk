@@ -1,7 +1,4 @@
-import { fromUint8Array as carRead } from '@atcute/car'
-import { decode as cborDecode } from '@atcute/cbor'
-import { toString as cidToString } from '@atcute/cid'
-import { fromUint8Array as repoRead } from '@atcute/repo'
+import { fromStream as repoFromStream } from '@atcute/repo'
 import { eq, sql } from 'drizzle-orm'
 import type { ObeliskConfig } from '../config'
 import type { Db } from '../db/client'
@@ -29,12 +26,15 @@ export interface BackfillResult {
 export interface BackfillDeps {
   /** DID → PDS endpoint. Defaults to the DID-document resolver. */
   resolvePds?: (did: string) => Promise<string>
-  /** PDS + DID → repo CAR bytes. Defaults to com.atproto.sync.getRepo. */
-  fetchCar?: (pds: string, did: string) => Promise<Uint8Array>
-  /** CAR bytes → commit rev. Defaults to reading the CAR root commit block. */
-  readRev?: (bytes: Uint8Array) => string
-  /** CAR bytes → record entries. Defaults to @atcute/repo. */
-  readEntries?: (bytes: Uint8Array) => Iterable<RepoRecord>
+  /** DID's current commit rev. Defaults to com.atproto.sync.getLatestCommit. */
+  fetchRev?: (pds: string, did: string) => Promise<string>
+  /**
+   * Stream the repo's records. Defaults to com.atproto.sync.getRepo parsed as a
+   * streamed CAR (@atcute/repo `fromStream`) — records are yielded incrementally
+   * so memory stays bounded regardless of repo size (LAB-57). Accepts a plain
+   * iterable too (tests inject an array).
+   */
+  openRepo?: (pds: string, did: string) => AsyncIterable<RepoRecord> | Iterable<RepoRecord>
   batchSize?: number
   onProgress?: (done: number, applied: number) => void
 }
@@ -62,9 +62,8 @@ export async function backfillRepo(
   deps: BackfillDeps = {},
 ): Promise<BackfillResult> {
   const pds = await (deps.resolvePds ?? resolvePds)(did)
-  const bytes = await (deps.fetchCar ?? defaultFetchCar)(pds, did)
-  const rev = (deps.readRev ?? readCommitRev)(bytes)
-  const entries = (deps.readEntries ?? defaultReadEntries)(bytes)
+  const rev = await (deps.fetchRev ?? fetchLatestRev)(pds, did)
+  const entries = (deps.openRepo ?? defaultOpenRepo)(pds, did)
 
   const batchSize = deps.batchSize ?? 200
   const byCollection: Record<string, number> = {}
@@ -87,7 +86,7 @@ export async function backfillRepo(
     deps.onProgress?.(total, applied)
   }
 
-  for (const entry of entries) {
+  for await (const entry of entries) {
     total += 1
     byCollection[entry.collection] = (byCollection[entry.collection] ?? 0) + 1
     batch.push({
@@ -111,34 +110,44 @@ export async function backfillRepo(
   return { did, rev, total, applied, skipped, byCollection }
 }
 
-async function defaultFetchCar(pds: string, did: string): Promise<Uint8Array> {
+/**
+ * The DID's current commit rev, via com.atproto.sync.getLatestCommit — a tiny
+ * JSON call, so we don't have to buffer the whole CAR just to read the rev. The
+ * streamed repo reader discards the commit block, and getRepo and getLatestCommit
+ * report the same head; a write racing between them just yields a newer rev,
+ * which the rev-compare upsert handles safely.
+ */
+async function fetchLatestRev(pds: string, did: string): Promise<string> {
+  const url = `${pds}/xrpc/com.atproto.sync.getLatestCommit?did=${encodeURIComponent(did)}`
+  const res = await fetch(url, { headers: { 'User-Agent': USER_AGENT } })
+  if (!res.ok) throw new Error(`getLatestCommit ${did} → ${res.status}`)
+  const body = (await res.json()) as { rev?: string }
+  if (typeof body.rev !== 'string') throw new Error(`no rev in getLatestCommit for ${did}`)
+  return body.rev
+}
+
+/**
+ * Stream the repo from com.atproto.sync.getRepo and yield records one at a time.
+ * `@atcute/repo`'s streamed reader parses the CAR off the HTTP body incrementally,
+ * so we never hold the whole repo in memory — a large DID no longer risks OOM on
+ * a small box (LAB-57).
+ */
+async function* defaultOpenRepo(pds: string, did: string): AsyncIterable<RepoRecord> {
   const url = `${pds}/xrpc/com.atproto.sync.getRepo?did=${encodeURIComponent(did)}`
   const res = await fetch(url, { headers: { 'User-Agent': USER_AGENT } })
-  if (!res.ok) throw new Error(`getRepo ${did} → ${res.status}`)
-  return new Uint8Array(await res.arrayBuffer())
-}
+  if (!res.ok || !res.body) throw new Error(`getRepo ${did} → ${res.status}`)
 
-/** Commit rev = the `rev` on the CAR's root commit block. */
-export function readCommitRev(bytes: Uint8Array): string {
-  const car = carRead(bytes)
-  const rootLink = car.roots[0]?.$link
-  if (!rootLink) throw new Error('CAR has no root')
-  for (const entry of car) {
-    if (cidToString(entry.cid) !== rootLink) continue
-    const commit = cborDecode(entry.bytes) as { rev?: string }
-    if (typeof commit.rev === 'string') return commit.rev
-    break
-  }
-  throw new Error('no commit rev in CAR root')
-}
-
-function* defaultReadEntries(bytes: Uint8Array): Iterable<RepoRecord> {
-  for (const entry of repoRead(bytes)) {
-    yield {
-      collection: entry.collection,
-      rkey: entry.rkey,
-      cid: entry.cid.$link,
-      record: entry.record as Record<string, unknown>,
+  const reader = repoFromStream(res.body)
+  try {
+    for await (const entry of reader) {
+      yield {
+        collection: entry.collection,
+        rkey: entry.rkey,
+        cid: entry.cid.$link,
+        record: entry.record as Record<string, unknown>,
+      }
     }
+  } finally {
+    await reader.dispose()
   }
 }

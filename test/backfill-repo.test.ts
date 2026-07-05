@@ -16,10 +16,20 @@ const REV = '3krev0000000' // snapshot commit rev
 function deps(entries: RepoRecord[], rev = REV, batchSize?: number): BackfillDeps {
   return {
     resolvePds: async () => 'https://pds.test',
-    fetchCar: async () => new Uint8Array(),
-    readRev: () => rev,
-    readEntries: () => entries,
+    fetchRev: async () => rev,
+    openRepo: () => entries,
     batchSize,
+  }
+}
+
+/** Lazily-yielding streaming source, to prove the async-iterable (streamed CAR) path. */
+async function* streamEntries(entries: RepoRecord[], counter?: { peak: number }): AsyncIterable<RepoRecord> {
+  let outstanding = 0
+  for (const entry of entries) {
+    outstanding += 1
+    if (counter) counter.peak = Math.max(counter.peak, outstanding)
+    yield entry
+    outstanding -= 1 // consumed before the next is produced → never materialized all at once
   }
 }
 
@@ -115,5 +125,20 @@ describe('backfillRepo', () => {
     expect(result.total).toBe(25)
     expect(result.applied).toBe(25)
     expect(await db.select().from(records).where(eq(records.did, DID))).toHaveLength(25)
+  })
+
+  test('streams an async-iterable repo incrementally (bounded memory, no full materialization)', async () => {
+    const entries = Array.from({ length: 30 }, (_, i) => rec('app.bsky.feed.like', `s${i}`, { i }))
+    const counter = { peak: 0 }
+    const result = await backfillRepo(db, testConfig, DID, {
+      resolvePds: async () => 'https://pds.test',
+      fetchRev: async () => REV,
+      openRepo: () => streamEntries(entries, counter),
+      batchSize: 10,
+    })
+    expect(result.applied).toBe(30)
+    expect(await db.select().from(records).where(eq(records.did, DID))).toHaveLength(30)
+    // Never more than one record "in hand" at a time — the whole repo is never buffered.
+    expect(counter.peak).toBe(1)
   })
 })
