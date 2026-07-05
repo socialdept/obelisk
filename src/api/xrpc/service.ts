@@ -39,6 +39,7 @@ import {
   removeWatched,
   updateWatched,
 } from '../routes/watched'
+import type { SseGuard } from '../ratelimit'
 import { xrpcError, type XrpcContext } from './respond'
 
 /** Reserved authority for Obelisk's own service-plane methods (domain dept.social). */
@@ -56,6 +57,8 @@ export interface ServiceDeps {
   blocklist: Blocklist
   /** Shared PDS deny-list (LAB-48). */
   pdsBlocklist: PdsBlocklist
+  /** Live-tail concurrency guard (LAB-52). */
+  sse?: SseGuard
 }
 
 /**
@@ -77,7 +80,7 @@ export function handleServiceMethod(verb: string, c: XrpcContext, deps: ServiceD
     case 'getEvents':
       return getEvents(c, deps)
     case 'subscribeEvents':
-      return subscribeEvents(c, deps.db, deps.config)
+      return subscribeEvents(c, deps.db, deps.config, deps.sse)
     case 'getTypes':
       return getTypes(c, deps)
     case 'getType':

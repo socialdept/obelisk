@@ -16,6 +16,11 @@
 		-Server
 	}
 
+	# Defense-in-depth body cap (the app also enforces its own limit).
+	request_body {
+		max_size 2MB
+	}
+
 	reverse_proxy app:6060 {
 		# flush_interval -1 disables response buffering so the SSE live tail
 		# (social.dept.obelisk.subscribeEvents, LAB-45) streams in real time.

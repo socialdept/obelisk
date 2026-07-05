@@ -5,7 +5,7 @@ export type XrpcContext = Context
 /** atproto-style error body: { error, message }. Shared by both XRPC planes. */
 export function xrpcError(
   c: XrpcContext,
-  status: 400 | 404 | 409 | 500 | 501 | 502,
+  status: 400 | 404 | 408 | 409 | 413 | 429 | 500 | 501 | 502 | 503,
   error: string,
   message: string,
 ) {

@@ -23,6 +23,7 @@ import { localInteractionCount } from '../../ranking/interactions'
 import type { RankingProfile } from '../../ranking/config'
 import type { Blocklist } from '../../ingest/blocklist'
 import type { PdsBlocklist } from '../../ingest/pds-blocklist'
+import type { SseGuard } from '../ratelimit'
 import { computeFacets, highlightExpr, type FacetBucket } from '../routes/search-enrich'
 import { clampLimit } from '../routes/records'
 
@@ -73,6 +74,8 @@ export interface XrpcDeps {
   blocklist: Blocklist
   /** Shared PDS deny-list (LAB-48). */
   pdsBlocklist: PdsBlocklist
+  /** Live-tail concurrency guard (LAB-52). */
+  sse?: SseGuard
 }
 
 export function xrpcRoutes(deps: XrpcDeps): Hono {

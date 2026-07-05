@@ -1,7 +1,8 @@
 import { streamSSE } from 'hono/streaming'
 import type { ObeliskConfig } from '../../config'
 import type { Db } from '../../db/client'
-import type { XrpcContext } from '../xrpc/respond'
+import { rateKeyFor, type SseGuard } from '../ratelimit'
+import { xrpcError, type XrpcContext } from '../xrpc/respond'
 import { queryEvents } from './events'
 
 const DEFAULT_POLL_MS = 1000
@@ -18,12 +19,19 @@ const MAX_POLL_MS = 60_000
  * slows the loop rather than buffering — the anti-flood invariant the project was
  * built around. The loop ends when the client aborts.
  */
-export function subscribeEvents(c: XrpcContext, db: Db, config: ObeliskConfig) {
+export function subscribeEvents(c: XrpcContext, db: Db, config: ObeliskConfig, sse?: SseGuard) {
   // Force ascending (chronological tail); carry every other getEvents filter through.
   const query: Record<string, string | undefined> = { ...c.req.query(), order: 'asc' }
   const pollMs = clampPoll(query.poll)
   // Resume from an explicit cursor, else the SSE reconnect header.
   const startCursor = query.cursor ?? c.req.header('Last-Event-ID')
+
+  // Cap concurrent live tails per identity (LAB-52) — the request rate limiter
+  // exempts this long-lived connection, so the concurrency slot is the guard.
+  const sseKey = sse ? rateKeyFor(c) : undefined
+  if (sse && sseKey && !sse.limiter.acquireSse(sseKey, sse.max)) {
+    return xrpcError(c, 429, 'RateLimitExceeded', 'too many concurrent live tails')
+  }
 
   return streamSSE(c, async (stream) => {
     let aborted = false
@@ -31,26 +39,31 @@ export function subscribeEvents(c: XrpcContext, db: Db, config: ObeliskConfig) {
       aborted = true
     })
 
-    let cursor = startCursor
-    while (!aborted) {
-      const result = await queryEvents(db, config, { ...query, cursor })
-      if ('error' in result) {
-        await stream.writeSSE({ event: 'error', data: JSON.stringify({ error: result.error }) })
-        return
-      }
+    try {
+      let cursor = startCursor
+      while (!aborted) {
+        const result = await queryEvents(db, config, { ...query, cursor })
+        if ('error' in result) {
+          await stream.writeSSE({ event: 'error', data: JSON.stringify({ error: result.error }) })
+          return
+        }
 
-      for (const event of result.events) {
-        const id = (event as { cursor: string }).cursor
-        await stream.writeSSE({ event: 'event', id, data: JSON.stringify(event) })
-      }
-      if (result.cursor) cursor = result.cursor
+        for (const event of result.events) {
+          const id = (event as { cursor: string }).cursor
+          await stream.writeSSE({ event: 'event', id, data: JSON.stringify(event) })
+        }
+        if (result.cursor) cursor = result.cursor
 
-      // Caught up → keepalive + wait before polling again. Pages that returned
-      // events loop straight back to drain the rest of the backlog first.
-      if (result.events.length === 0) {
-        await stream.writeSSE({ event: 'ping', data: '' })
-        await stream.sleep(pollMs)
+        // Caught up → keepalive + wait before polling again. Pages that returned
+        // events loop straight back to drain the rest of the backlog first.
+        if (result.events.length === 0) {
+          await stream.writeSSE({ event: 'ping', data: '' })
+          await stream.sleep(pollMs)
+        }
       }
+    } finally {
+      // Release the concurrency slot however the tail ends (abort, error, close).
+      if (sse && sseKey) sse.limiter.releaseSse(sseKey)
     }
   })
 }

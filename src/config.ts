@@ -1,3 +1,4 @@
+import type { Limits } from './api/ratelimit'
 import { validateRankings, type RankingConfig } from './ranking/config'
 import type { InteractionSourceConfig } from './ranking/source'
 
@@ -53,6 +54,19 @@ export interface Env {
   ollamaUrl: string
   port: number
   devMode: boolean
+  /** API abuse guards (LAB-52). */
+  limits: Limits
+  /** Cancels a slow query at the DB (LAB-52). 0 = no timeout. */
+  dbStatementTimeoutMs: number
+}
+
+/** Parse an env var as a non-negative integer; `fallback` when unset/invalid. */
+function intEnv(name: string, fallback: number): number {
+  const raw = process.env[name]
+  if (raw === undefined || raw === '') return fallback
+  const n = Number(raw)
+  if (!Number.isInteger(n) || n < 0) throw new Error(`${name} must be a non-negative integer, got: ${raw}`)
+  return n
 }
 
 export function loadEnv(): Env {
@@ -64,8 +78,16 @@ export function loadEnv(): Env {
     tabWsUrl: process.env.TAB_WS_URL ?? 'ws://localhost:2480',
     tabFootprintAdminUrl: process.env.TAB_FOOTPRINT_ADMIN_URL,
     ollamaUrl: process.env.OLLAMA_URL ?? 'http://127.0.0.1:11434',
-    port: Number(process.env.PORT ?? 6060),
+    port: intEnv('PORT', 6060),
     devMode: process.env.OBELISK_DEV_MODE === 'true',
+    limits: {
+      rateLimitPerMin: intEnv('OBELISK_RATE_LIMIT_PER_MIN', 120),
+      rateLimitExpensivePerMin: intEnv('OBELISK_RATE_LIMIT_EXPENSIVE_PER_MIN', 30),
+      maxBodyBytes: intEnv('OBELISK_MAX_BODY_BYTES', 1_048_576),
+      requestTimeoutMs: intEnv('OBELISK_REQUEST_TIMEOUT_MS', 30_000),
+      maxSseConnections: intEnv('OBELISK_MAX_SSE_CONNECTIONS', 5),
+    },
+    dbStatementTimeoutMs: intEnv('OBELISK_DB_STATEMENT_TIMEOUT_MS', 30_000),
   }
 }
 

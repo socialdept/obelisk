@@ -18,7 +18,7 @@ const config = await loadConfig()
 
 await migrate(env.databaseUrl)
 
-const { db, client } = createDb(env.databaseUrl)
+const { db, client } = createDb(env.databaseUrl, { statementTimeoutMs: env.dbStatementTimeoutMs })
 const ollama = new OllamaClient(env.ollamaUrl, config.ollama.model)
 const lexicons = new LexiconRegistry(db)
 // Shared deny-lists: the ingester skips their DIDs/PDSes, the API mutates them.
@@ -58,7 +58,7 @@ ingester.start(env.tabWsUrl)
 embedWorker.start()
 webhookWorker.start()
 
-const app = createApp({ db, config, ollama, lexicons, tabAdmin, blocklist, pdsBlocklist, devMode: env.devMode })
+const app = createApp({ db, config, ollama, lexicons, tabAdmin, blocklist, pdsBlocklist, limits: env.limits, devMode: env.devMode })
 const server = Bun.serve({ port: env.port, fetch: app.fetch, idleTimeout: 60 })
 
 console.log(`obelisk: ingesting + embedding, api on :${env.port}`)
