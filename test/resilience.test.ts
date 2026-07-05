@@ -73,6 +73,7 @@ describe('embed worker — concurrency', () => {
     const processed = await worker.tick()
     expect(processed).toBe(6)
     expect(peak).toBeGreaterThan(1) // ran in parallel, not one-at-a-time
+    expect(worker.status().completed).toBe(6) // cumulative counter for /metrics
     const done = await db.execute<{ n: string }>(
       sql`SELECT count(*) AS n FROM records WHERE did = 'did:plc:b' AND embed_status = 'done'`,
     )

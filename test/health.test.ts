@@ -16,7 +16,7 @@ afterAll(() => teardown())
 
 const providers: HealthProviders = {
   ingester: () => ({ status: 'up', connected: true, applied: 5, skipped: 1, pending: 0 }),
-  embedWorker: () => ({ status: 'up', lastError: null }),
+  embedWorker: () => ({ status: 'up', embedFailures: 0, completed: 1234, skipped: 56, lastError: null }),
   webhookWorker: () => ({ status: 'up' }),
   embedder: () => ({ status: 'degraded', error: 'connection refused' }),
 }
@@ -53,6 +53,9 @@ describe('metricsText', () => {
     expect(text).toContain('obelisk_db_up 1')
     expect(text).toContain('obelisk_ingester_connected 1')
     expect(text).toContain('obelisk_embedder_up 0')
+    expect(text).toContain('obelisk_embeds_completed_total 1234')
+    expect(text).toContain('obelisk_embeds_skipped_total 56')
+    expect(text).toMatch(/# TYPE obelisk_embeds_completed_total counter/)
     expect(text).toMatch(/# TYPE obelisk_ready gauge/)
   })
 })
