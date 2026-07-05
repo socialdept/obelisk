@@ -33,7 +33,7 @@ In practice: the collections config is just a list of NSIDs. Title fields, prose
 - **Bun + TypeScript**, single process: ingester + embedding worker + HTTP API
 - **Tab** (docker) for sync — multiple signal collections, ack-based websocket
 - **Postgres 17 + pgvector** via Drizzle ORM
-- **Ollama** (`nomic-embed-text`) for embeddings
+- **Ollama** (`nomic-embed-text`) for embeddings — or an **OpenAI-compatible API** (pluggable, see below)
 - **Hono** API with bearer token auth
 
 Target collections (configurable in `obelisk.config.ts`): `site.standard.document`, `site.standard.publication`, `site.standard.graph.subscription`, `site.standard.graph.recommend`.
@@ -260,6 +260,23 @@ The Postgres volume is Obelisk's only source of truth — an archive with no bac
 ```
 
 Schedule the backup from host cron (`0 3 * * * cd /srv/obelisk && ./scripts/backup.sh`), and copy `./backups` off-box. Restore recovers to the last dump; anything newer re-ingests from the network idempotently. See the [deployment runbook](.docs/deployment/vps.md) for the full procedure.
+
+## Embedding backend
+
+Embeddings come from a **pluggable provider** (`EMBEDDING_PROVIDER`), so the same archive runs on a beefy box or a $6 VPS:
+
+- **`ollama`** (default) — local CPU inference (`nomic-embed-text`, 768-dim). Zero external deps, but on a 1-vCPU box it saturates the core, so the embed backlog drains slowly.
+- **`openai`** — offloads embeddings to an OpenAI-compatible API (`text-embedding-3-small`, requested at 768-dim to match the column). The single vCPU goes idle, RAM frees up (~500 MB), and the backlog drains in parallel. Costs pennies for this corpus. Set `OPENAI_API_KEY` (and optionally `OPENAI_BASE_URL` for a compatible endpoint).
+
+Both write the same `vector(768)` column, but their vectors aren't cross-compatible — **switching providers means re-embedding** for coherent semantic search:
+
+```bash
+# reset and let the worker rebuild embeddings with the new provider
+docker compose exec postgres psql -U obelisk -d obelisk \
+  -c "UPDATE records SET embed_status='pending' WHERE embed_status IN ('done','failed')"
+```
+
+Keyword (FTS) search is unaffected either way — only vector/semantic search depends on the provider.
 
 ## Production (VPS)
 

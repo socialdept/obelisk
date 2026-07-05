@@ -18,7 +18,7 @@ export interface HealthProviders {
   ingester?: () => ComponentStatus
   embedWorker?: () => ComponentStatus
   webhookWorker?: () => ComponentStatus
-  ollama?: () => ComponentStatus | Promise<ComponentStatus>
+  embedder?: () => ComponentStatus | Promise<ComponentStatus>
 }
 
 export interface ReadyReport {
@@ -60,7 +60,7 @@ export async function readyReport(db: Db, providers: HealthProviders = {}): Prom
   if (providers.ingester) components.ingester = providers.ingester()
   if (providers.embedWorker) components.embedWorker = providers.embedWorker()
   if (providers.webhookWorker) components.webhookWorker = providers.webhookWorker()
-  if (providers.ollama) components.ollama = await providers.ollama()
+  if (providers.embedder) components.embedder = await providers.embedder()
 
   const statuses = Object.values(components).map((c) => c.status)
   return {
@@ -94,7 +94,7 @@ export function metricsText(report: ReadyReport): string {
     gauge('obelisk_ingester_skipped', Number(c.ingester.skipped ?? 0), 'Events skipped by the ingester')
     gauge('obelisk_ingester_pending', Number(c.ingester.pending ?? 0), 'Events buffered in the ingester')
   }
-  if (c.ollama) gauge('obelisk_ollama_up', bit(c.ollama.status === 'up'), 'Ollama embedding backend reachable')
+  if (c.embedder) gauge('obelisk_embedder_up', bit(c.embedder.status === 'up'), 'Embedding backend reachable')
 
   return lines.join('\n') + '\n'
 }

@@ -3,7 +3,7 @@ import type { ObeliskConfig } from '../config'
 import { ConstellationClient } from '../constellation/client'
 import type { Db } from '../db/client'
 import { metricsText, readyReport, type HealthProviders } from '../health'
-import type { OllamaClient } from '../embed/ollama'
+import type { EmbeddingProvider } from '../embed/provider'
 import { Blocklist } from '../ingest/blocklist'
 import { PdsBlocklist } from '../ingest/pds-blocklist'
 import { TabAdmin } from '../ingest/tab-admin'
@@ -16,7 +16,8 @@ import { xrpcRoutes } from './xrpc/collections'
 export interface ApiDeps {
   db: Db
   config: ObeliskConfig
-  ollama: OllamaClient
+  /** Embedding backend (LAB-9): Ollama or OpenAI. Field name kept for continuity. */
+  ollama: EmbeddingProvider
   constellation?: ConstellationClient
   lexicons?: LexiconRegistry
   /** Footprint-Tab enrollment client. Defaults to unconfigured (no-op) — see TabAdmin. */

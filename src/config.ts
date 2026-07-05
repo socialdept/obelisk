@@ -62,6 +62,14 @@ export interface Env {
   limits: Limits
   /** Cancels a slow query at the DB (LAB-52). 0 = no timeout. */
   dbStatementTimeoutMs: number
+  /** Embedding backend selection (LAB-9). */
+  embedding: {
+    provider: 'ollama' | 'openai'
+    /** Required when provider is 'openai'. */
+    openaiApiKey?: string
+    openaiModel: string
+    openaiBaseUrl: string
+  }
 }
 
 /** Loopback interfaces — dev-mode (auth off) is only safe when bound to one of these. */
@@ -93,6 +101,15 @@ export function loadEnv(): Env {
   const host = process.env.OBELISK_HOST ?? '0.0.0.0'
   const devMode = process.env.OBELISK_DEV_MODE === 'true'
 
+  const provider = process.env.EMBEDDING_PROVIDER ?? 'ollama'
+  if (provider !== 'ollama' && provider !== 'openai') {
+    throw new Error(`EMBEDDING_PROVIDER must be 'ollama' or 'openai', got: ${provider}`)
+  }
+  const openaiApiKey = process.env.OPENAI_API_KEY
+  if (provider === 'openai' && !openaiApiKey?.trim()) {
+    throw new Error('OPENAI_API_KEY is required when EMBEDDING_PROVIDER=openai')
+  }
+
   // Fail-fast: dev-mode disables auth entirely, so refuse to boot with it on
   // while bound to a non-loopback interface (i.e. potentially reachable) unless
   // the operator explicitly acknowledges the risk. A public box with auth
@@ -120,6 +137,12 @@ export function loadEnv(): Env {
       maxSseConnections: intEnv('OBELISK_MAX_SSE_CONNECTIONS', 5),
     },
     dbStatementTimeoutMs: intEnv('OBELISK_DB_STATEMENT_TIMEOUT_MS', 30_000),
+    embedding: {
+      provider,
+      openaiApiKey,
+      openaiModel: process.env.OPENAI_EMBEDDING_MODEL ?? 'text-embedding-3-small',
+      openaiBaseUrl: urlEnv('OPENAI_BASE_URL', process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1'),
+    },
   }
 }
 

@@ -1,9 +1,13 @@
 import type { ComponentStatus } from '../health'
+import type { EmbeddingProvider } from './provider'
 
-export class OllamaClient {
+export class OllamaClient implements EmbeddingProvider {
+  readonly name = 'ollama'
+
   constructor(
     private readonly baseUrl: string,
     private readonly model: string,
+    readonly dimensions: number = 768,
   ) {}
 
   /**

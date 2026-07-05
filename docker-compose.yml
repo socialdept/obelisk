@@ -48,6 +48,9 @@ services:
   ollama:
     image: ollama/ollama:latest
     restart: unless-stopped
+    # Only boots when the "ollama" profile is active (COMPOSE_PROFILES in .env).
+    # Set EMBEDDING_PROVIDER=openai + drop this profile to reclaim its RAM (LAB-59).
+    profiles: ["ollama"]
     # Not exposed to the host — only the app talks to it over the compose network.
     expose:
       - "11434"

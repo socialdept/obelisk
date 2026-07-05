@@ -3,7 +3,7 @@ import { and, eq, isNull, sql, type SQL } from 'drizzle-orm'
 import type { ObeliskConfig } from '../../config'
 import type { ConstellationClient } from '../../constellation/client'
 import type { Db } from '../../db/client'
-import type { OllamaClient } from '../../embed/ollama'
+import type { EmbeddingProvider } from '../../embed/provider'
 import type { LexiconRegistry } from '../../lexicon/registry'
 import type { TabAdmin } from '../../ingest/tab-admin'
 import type { FetchFn } from '../../webhooks/worker'
@@ -63,7 +63,7 @@ const RETRIEVE_K = 100
  */
 export interface XrpcDeps {
   db: Db
-  ollama: OllamaClient
+  ollama: EmbeddingProvider
   config: ObeliskConfig
   constellation: ConstellationClient
   lexicons: LexiconRegistry
@@ -181,7 +181,7 @@ async function countRecords(c: XrpcContext, db: Db, collection: string) {
 async function searchRecords(
   c: XrpcContext,
   db: Db,
-  ollama: OllamaClient,
+  ollama: EmbeddingProvider,
   config: ObeliskConfig,
   collection: string,
 ) {
@@ -286,7 +286,7 @@ async function rankedSearch(
 async function hybridSearch(
   c: XrpcContext,
   db: Db,
-  ollama: OllamaClient,
+  ollama: EmbeddingProvider,
   config: ObeliskConfig,
   body: QueryBody,
   filters: SQL[],
@@ -341,7 +341,7 @@ async function hybridSearch(
  * a thrown 500 (LAB-56). The caller maps the error to a 503 so `mode: fts` keeps
  * working while the embedding backend is down.
  */
-async function embedQuery(ollama: OllamaClient, q: string): Promise<{ vector: number[] } | { error: string }> {
+async function embedQuery(ollama: EmbeddingProvider, q: string): Promise<{ vector: number[] } | { error: string }> {
   try {
     const [vector] = await ollama.embed([q])
     if (!vector) return { error: 'semantic search unavailable: embedding backend returned no vector' }
