@@ -51,6 +51,35 @@ describe('embed worker — Ollama outage', () => {
   })
 })
 
+describe('embed worker — concurrency', () => {
+  test('embeds a claimed batch concurrently in one tick', async () => {
+    for (let i = 0; i < 6; i++) {
+      await applyEvent(db, testConfig, makeEvent({ did: 'did:plc:b', rkey: `c${i}` }))
+    }
+
+    let inFlight = 0
+    let peak = 0
+    const embedder = {
+      embed: async (inputs: string[]) => {
+        inFlight += 1
+        peak = Math.max(peak, inFlight)
+        await new Promise((r) => setTimeout(r, 10))
+        inFlight -= 1
+        return inputs.map(() => new Array(768).fill(0))
+      },
+    } as unknown as OllamaClient
+    const worker = new EmbedWorker(db, testConfig, embedder, { claimSize: 6 })
+
+    const processed = await worker.tick()
+    expect(processed).toBe(6)
+    expect(peak).toBeGreaterThan(1) // ran in parallel, not one-at-a-time
+    const done = await db.execute<{ n: string }>(
+      sql`SELECT count(*) AS n FROM records WHERE did = 'did:plc:b' AND embed_status = 'done'`,
+    )
+    expect(Number(done[0]!.n)).toBe(6)
+  })
+})
+
 describe('semantic search — Ollama down', () => {
   test('returns a clean 503, not a 500 stack trace', async () => {
     const ollama = {

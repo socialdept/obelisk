@@ -62,6 +62,8 @@ export interface Env {
   limits: Limits
   /** Cancels a slow query at the DB (LAB-52). 0 = no timeout. */
   dbStatementTimeoutMs: number
+  /** Embed batch size = concurrent embeds per tick (LAB-59). Higher drains a backlog faster. */
+  embedBatchSize: number
   /** Embedding backend selection (LAB-9). */
   embedding: {
     provider: 'ollama' | 'openai'
@@ -137,6 +139,7 @@ export function loadEnv(): Env {
       maxSseConnections: intEnv('OBELISK_MAX_SSE_CONNECTIONS', 5),
     },
     dbStatementTimeoutMs: intEnv('OBELISK_DB_STATEMENT_TIMEOUT_MS', 30_000),
+    embedBatchSize: Math.max(1, intEnv('OBELISK_EMBED_BATCH', 10)),
     embedding: {
       provider,
       openaiApiKey,
