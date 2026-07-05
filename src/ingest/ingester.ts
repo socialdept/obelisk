@@ -1,8 +1,12 @@
 import type { ObeliskConfig } from '../config'
 import type { Db } from '../db/client'
+import type { ComponentStatus } from '../health'
+import { logger } from '../log'
 import type { Blocklist } from './blocklist'
 import type { PdsBlocklist } from './pds-blocklist'
 import { applyEvent, type RecordEvent } from './upsert'
+
+const log = logger('ingester')
 
 export interface IngesterOptions {
   batchSize?: number
@@ -72,16 +76,33 @@ export class Ingester {
     await this.flushPromise
   }
 
+  /**
+   * Health snapshot (LAB-54). `up` when connected to Tab, `degraded` while
+   * reconnecting (the archive still serves; live ingest is just paused),
+   * `down` once stopped.
+   */
+  status(): ComponentStatus {
+    const connected = this.ws?.readyState === WebSocket.OPEN
+    return {
+      status: this.stopped ? 'down' : connected ? 'up' : 'degraded',
+      connected,
+      applied: this.stats.applied,
+      skipped: this.stats.skipped,
+      pending: this.pending.length,
+      reconnectAttempt: this.reconnectAttempt,
+    }
+  }
+
   private connect(url: string): void {
     if (this.stopped) return
-    console.log(`ingester: connecting to ${url}`)
+    log.info('connecting', { url })
 
     const ws = new WebSocket(url)
     this.ws = ws
 
     ws.onopen = () => {
       this.reconnectAttempt = 0
-      console.log('ingester: connected')
+      log.info('connected')
     }
 
     ws.onmessage = (msg) => this.handleMessage(String(msg.data))
@@ -90,11 +111,11 @@ export class Ingester {
       if (this.stopped) return
       this.reconnectAttempt += 1
       const delay = Math.min(1000 * 2 ** this.reconnectAttempt, this.maxReconnectMs)
-      console.log(`ingester: disconnected, reconnecting in ${delay}ms`)
+      log.warn('disconnected, reconnecting', { delayMs: delay, attempt: this.reconnectAttempt })
       setTimeout(() => this.connect(url), delay)
     }
 
-    ws.onerror = (err) => console.error('ingester: socket error', err)
+    ws.onerror = (err) => log.error('socket error', { err })
   }
 
   private handleMessage(data: string): void {
@@ -102,7 +123,7 @@ export class Ingester {
     try {
       parsed = JSON.parse(data) as TapWireEvent
     } catch (err) {
-      console.error('ingester: unparseable message', err)
+      log.error('unparseable message', { err })
       return
     }
 
@@ -167,7 +188,7 @@ export class Ingester {
       } catch (err) {
         attempt += 1
         const delay = Math.min(1000 * 2 ** attempt, 30_000)
-        console.error(`ingester: batch commit failed (attempt ${attempt}), retrying in ${delay}ms`, err)
+        log.error('batch commit failed, retrying', { attempt, delayMs: delay, err })
         await Bun.sleep(delay)
       }
     }
@@ -183,7 +204,7 @@ export class Ingester {
     const total = this.stats.applied + this.stats.skipped
     if (total - this.stats.lastLogged < 1000) return
     this.stats.lastLogged = total
-    console.log(`ingester: ${this.stats.applied} applied, ${this.stats.skipped} skipped`)
+    log.info('progress', { applied: this.stats.applied, skipped: this.stats.skipped })
   }
 }
 

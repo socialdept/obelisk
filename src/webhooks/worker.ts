@@ -6,9 +6,12 @@ import type { Db } from '../db/client'
 import { events, records, webhookSubscriptions, type WebhookSubscription } from '../db/schema'
 import { buildFeedFilter } from '../feeds/filter'
 import { jsonMatcherFilters } from '../api/routes/records'
+import type { ComponentStatus } from '../health'
+import { logger } from '../log'
 
 const MAX_BACKOFF_MS = 300_000
 const FAILING_THRESHOLD = 100
+const log = logger('webhook')
 
 export type FetchFn = typeof fetch
 
@@ -43,9 +46,14 @@ export class WebhookWorker {
     await this.loopPromise
   }
 
+  /** Health snapshot (LAB-54): `down` once stopped, else `up`. */
+  status(): ComponentStatus {
+    return { status: this.stopped ? 'down' : 'up' }
+  }
+
   private async loop(): Promise<void> {
     while (!this.stopped) {
-      await this.tick().catch((err) => console.error('webhook worker: tick failed', err))
+      await this.tick().catch((err) => log.error('tick failed', { err }))
       await Bun.sleep(this.idleMs)
     }
   }

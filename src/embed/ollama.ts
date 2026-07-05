@@ -1,8 +1,25 @@
+import type { ComponentStatus } from '../health'
+
 export class OllamaClient {
   constructor(
     private readonly baseUrl: string,
     private readonly model: string,
   ) {}
+
+  /**
+   * Reachability probe for /readyz (LAB-54). Ollama-down is `degraded`, not
+   * `down`: semantic search is unavailable but the archive keeps serving and
+   * embeddings drain once it returns. Short timeout so a hung backend can't
+   * stall the readiness check.
+   */
+  async health(): Promise<ComponentStatus> {
+    try {
+      const res = await fetch(this.baseUrl, { signal: AbortSignal.timeout(2000) })
+      return res.ok ? { status: 'up' } : { status: 'degraded', code: res.status }
+    } catch (err) {
+      return { status: 'degraded', error: err instanceof Error ? err.message : String(err) }
+    }
+  }
 
   /** Embed one or more inputs in a single request. Returns one vector per input. */
   async embed(inputs: string[]): Promise<number[][]> {

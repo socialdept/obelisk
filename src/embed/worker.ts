@@ -7,9 +7,12 @@ import { chunkText } from './chunk'
 import { extractFields } from './extract'
 import { extractRichText, type TextKeysResolver } from './rich'
 import type { CollectionExtraction } from '../lexicon/collection'
+import type { ComponentStatus } from '../health'
+import { logger } from '../log'
 import type { OllamaClient } from './ollama'
 
 const MAX_ATTEMPTS = 3
+const log = logger('embed')
 
 export type ExtractionResolver = (collection: string) => Promise<CollectionExtraction>
 
@@ -34,6 +37,7 @@ export class EmbedWorker {
   private readonly extraction: ExtractionResolver
   private stopped = false
   private loopPromise: Promise<void> | null = null
+  private lastError: string | null = null
 
   constructor(
     private readonly db: Db,
@@ -65,10 +69,16 @@ export class EmbedWorker {
     await this.loopPromise
   }
 
+  /** Health snapshot (LAB-54): `down` once stopped, else `up`. */
+  status(): ComponentStatus {
+    return { status: this.stopped ? 'down' : 'up', lastError: this.lastError }
+  }
+
   private async loop(): Promise<void> {
     while (!this.stopped) {
       const processed = await this.tick().catch((err) => {
-        console.error('embed worker: tick failed', err)
+        this.lastError = err instanceof Error ? err.message : String(err)
+        log.error('tick failed', { err })
         return 0
       })
       if (processed === 0) await Bun.sleep(this.idleMs)
@@ -152,7 +162,7 @@ export class EmbedWorker {
     } catch (err) {
       const attempts = row.attempts + 1
       const status = attempts >= MAX_ATTEMPTS ? 'failed' : 'pending'
-      console.error(`embed worker: record ${recordId} attempt ${attempts} failed`, err)
+      log.error('record embed failed', { recordId, attempts, err })
       await this.db
         .update(records)
         .set({ embedStatus: status, embedAttempts: attempts })

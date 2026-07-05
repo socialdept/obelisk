@@ -11,7 +11,10 @@ import { TabAdmin } from './ingest/tab-admin'
 import { createExtractionResolver } from './lexicon/collection'
 import { LexiconRegistry } from './lexicon/registry'
 import { createTextKeysResolver } from './lexicon/textkeys'
+import { logger } from './log'
 import { WebhookWorker } from './webhooks/worker'
+
+const log = logger('obelisk')
 
 const env = loadEnv()
 const config = await loadConfig()
@@ -35,11 +38,11 @@ const webhookWorker = new WebhookWorker(db, config)
 const tabAdmin = new TabAdmin(env.tabFootprintAdminUrl)
 
 const shutdown = async () => {
-  console.log('shutting down…')
+  log.info('shutting down')
   // Hard deadline: a deep embed/ingest backlog must not hold the process
   // (and the port) hostage — anything unfinished redelivers or re-claims.
   setTimeout(() => {
-    console.error('shutdown deadline exceeded, exiting')
+    log.error('shutdown deadline exceeded, exiting')
     process.exit(1)
   }, 10_000)
 
@@ -58,7 +61,23 @@ ingester.start(env.tabWsUrl)
 embedWorker.start()
 webhookWorker.start()
 
-const app = createApp({ db, config, ollama, lexicons, tabAdmin, blocklist, pdsBlocklist, limits: env.limits, devMode: env.devMode })
+const app = createApp({
+  db,
+  config,
+  ollama,
+  lexicons,
+  tabAdmin,
+  blocklist,
+  pdsBlocklist,
+  limits: env.limits,
+  health: {
+    ingester: () => ingester.status(),
+    embedWorker: () => embedWorker.status(),
+    webhookWorker: () => webhookWorker.status(),
+    ollama: () => ollama.health(),
+  },
+  devMode: env.devMode,
+})
 const server = Bun.serve({ port: env.port, hostname: env.host, fetch: app.fetch, idleTimeout: 60 })
 
-console.log(`obelisk: ingesting + embedding, api on ${env.host}:${env.port}`)
+log.info('started', { host: env.host, port: env.port })

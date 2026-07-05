@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import type { ObeliskConfig } from '../config'
 import { ConstellationClient } from '../constellation/client'
 import type { Db } from '../db/client'
+import { metricsText, readyReport, type HealthProviders } from '../health'
 import type { OllamaClient } from '../embed/ollama'
 import { Blocklist } from '../ingest/blocklist'
 import { PdsBlocklist } from '../ingest/pds-blocklist'
@@ -28,6 +29,8 @@ export interface ApiDeps {
   pdsBlocklist?: PdsBlocklist
   /** Abuse guards (LAB-52). Defaults to UNLIMITED (off) — production passes real values. */
   limits?: Limits
+  /** Live component snapshots for /readyz + /metrics (LAB-54). */
+  health?: HealthProviders
   /** Disables API authentication entirely. Local development only. */
   devMode?: boolean
 }
@@ -40,12 +43,26 @@ export interface ApiDeps {
  *
  * Bearer-authed unless devMode.
  */
-export function createApp({ db, config, ollama, constellation, lexicons, tabAdmin, fetchFn, blocklist, pdsBlocklist, limits, devMode }: ApiDeps): Hono {
+export function createApp({ db, config, ollama, constellation, lexicons, tabAdmin, fetchFn, blocklist, pdsBlocklist, limits, health, devMode }: ApiDeps): Hono {
   const app = new Hono()
 
-  // Liveness — cheap, unauthenticated. `/readyz` (dependency checks) lands in LAB-54.
+  // Liveness — cheap, unauthenticated, no dependency checks: is the process up?
   app.get('/health', (c) => c.json({ ok: true }))
   app.get('/healthz', (c) => c.json({ ok: true }))
+
+  // Readiness — dependency checks (DB + workers + Ollama). 200 when serving
+  // (degraded still counts), 503 only when a critical dependency is down.
+  app.get('/readyz', async (c) => {
+    const report = await readyReport(db, health ?? {})
+    return c.json(report, report.ok ? 200 : 503)
+  })
+
+  // Prometheus metrics — behind auth (unless devMode); probes above stay open.
+  if (!devMode) app.use('/metrics', bearerAuth(db))
+  app.get('/metrics', async (c) => {
+    const report = await readyReport(db, health ?? {})
+    return c.text(metricsText(report), 200, { 'Content-Type': 'text/plain; version=0.0.4' })
+  })
 
   const constellationClient = constellation ?? new ConstellationClient(db, config.constellation)
   const lexiconRegistry = lexicons ?? new LexiconRegistry(db)
