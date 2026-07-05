@@ -19,9 +19,11 @@ export class OllamaClient implements EmbeddingProvider {
   async health(): Promise<ComponentStatus> {
     try {
       const res = await fetch(this.baseUrl, { signal: AbortSignal.timeout(2000) })
-      return res.ok ? { status: 'up' } : { status: 'degraded', code: res.status }
+      return res.ok
+        ? { status: 'up', provider: this.name, model: this.model }
+        : { status: 'degraded', provider: this.name, code: res.status }
     } catch (err) {
-      return { status: 'degraded', error: err instanceof Error ? err.message : String(err) }
+      return { status: 'degraded', provider: this.name, error: err instanceof Error ? err.message : String(err) }
     }
   }
 

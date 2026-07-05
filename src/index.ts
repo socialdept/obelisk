@@ -31,6 +31,7 @@ const pdsBlocklist = new PdsBlocklist(db, undefined, (config.identity?.didPdsCac
 await pdsBlocklist.loadPatterns()
 const ingester = new Ingester(db, config, {}, blocklist, pdsBlocklist)
 const embedWorker = new EmbedWorker(db, config, embedder, {
+  claimSize: env.embedBatchSize,
   textKeys: createTextKeysResolver(lexicons),
   extraction: createExtractionResolver(lexicons, config.collections),
 })

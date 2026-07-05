@@ -113,14 +113,18 @@ export class EmbedWorker {
     `)
     if (claimed.length === 0) return 0
 
-    let processed = 0
-    for (const { id } of claimed) {
-      // Bail the whole batch the moment Ollama is unreachable — no point trying
-      // the rest; the loop backs off and re-claims them next round.
-      if ((await this.embedRecord(id)) === 'backend-down') break
-      processed += 1
-    }
-    return processed
+    // Embed the whole claimed batch concurrently. Sequential round-trips were the
+    // throughput ceiling when draining a large backlog — especially via an API
+    // provider, where each record is a network call. claimSize bounds the fan-out.
+    const results = await Promise.all(claimed.map(({ id }) => this.embedRecord(id)))
+
+    // Failure accounting once per tick (not per record) so a concurrent batch
+    // doesn't over-count: a down backend bumps the backoff by one; a real embed
+    // clears it.
+    if (results.some((r) => r === 'backend-down')) this.embedFailures += 1
+    else if (results.some((r) => r === 'ok')) this.embedFailures = 0
+
+    return results.filter((r) => r !== 'backend-down').length
   }
 
   private async embedRecord(recordId: number): Promise<'ok' | 'skipped' | 'backend-down'> {
@@ -159,17 +163,17 @@ export class EmbedWorker {
     const chunks = chunkText(text, this.config.ollama)
 
     // Embedding is the one call that can fail because the *backend* is down, as
-    // opposed to a bad record. Keep it separate: an Ollama failure must NOT burn
+    // opposed to a bad record. Keep it separate: a backend outage must NOT burn
     // the record's attempts (else an outage would permanently fail the archive).
+    // Failure accounting (backoff) is done once per tick, not per record, so a
+    // concurrent batch doesn't over-count.
     let vectors: number[][]
     try {
       vectors = await this.embedder.embed(chunks)
     } catch (err) {
-      this.embedFailures += 1
       this.lastError = err instanceof Error ? err.message : String(err)
-      return 'backend-down' // record stays pending; drains when Ollama returns
+      return 'backend-down' // record stays pending; drains when the backend returns
     }
-    this.embedFailures = 0 // a success clears the backoff
 
     try {
       await this.db.transaction(async (tx) => {
