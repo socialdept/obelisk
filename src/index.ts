@@ -59,6 +59,6 @@ embedWorker.start()
 webhookWorker.start()
 
 const app = createApp({ db, config, ollama, lexicons, tabAdmin, blocklist, pdsBlocklist, limits: env.limits, devMode: env.devMode })
-const server = Bun.serve({ port: env.port, fetch: app.fetch, idleTimeout: 60 })
+const server = Bun.serve({ port: env.port, hostname: env.host, fetch: app.fetch, idleTimeout: 60 })
 
-console.log(`obelisk: ingesting + embedding, api on :${env.port}`)
+console.log(`obelisk: ingesting + embedding, api on ${env.host}:${env.port}`)

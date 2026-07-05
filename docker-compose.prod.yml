@@ -8,6 +8,16 @@
 # compose network, so it is never directly reachable from the internet.
 
 services:
+  # Production requires a real DB password — no `:-obelisk` fallback here, so
+  # `up` fails fast if POSTGRES_PASSWORD is unset. Generate one: openssl rand -hex 32
+  postgres:
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env (openssl rand -hex 32)}
+
+  app:
+    environment:
+      DATABASE_URL: postgres://obelisk:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/obelisk
+
   caddy:
     image: caddy:2
     restart: unless-stopped
