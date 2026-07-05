@@ -18,14 +18,14 @@ const providers: HealthProviders = {
   ingester: () => ({ status: 'up', connected: true, applied: 5, skipped: 1, pending: 0 }),
   embedWorker: () => ({ status: 'up', lastError: null }),
   webhookWorker: () => ({ status: 'up' }),
-  ollama: () => ({ status: 'degraded', error: 'connection refused' }),
+  embedder: () => ({ status: 'degraded', error: 'connection refused' }),
 }
 
 describe('readyReport', () => {
   test('db up + a degraded dependency → ready but flagged degraded', async () => {
     const report = await readyReport(db, providers)
     expect(report.components.db?.status).toBe('up')
-    expect(report.components.ollama?.status).toBe('degraded')
+    expect(report.components.embedder?.status).toBe('degraded')
     expect(report.ok).toBe(true) // degraded still serves
     expect(report.degraded).toBe(true)
     expect(report.components.embedQueue?.status).toBe('up')
@@ -52,7 +52,7 @@ describe('metricsText', () => {
     expect(text).toContain('obelisk_degraded 1')
     expect(text).toContain('obelisk_db_up 1')
     expect(text).toContain('obelisk_ingester_connected 1')
-    expect(text).toContain('obelisk_ollama_up 0')
+    expect(text).toContain('obelisk_embedder_up 0')
     expect(text).toMatch(/# TYPE obelisk_ready gauge/)
   })
 })

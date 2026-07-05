@@ -11,6 +11,8 @@ const KEYS = [
   'OBELISK_DEV_MODE',
   'OBELISK_ALLOW_INSECURE',
   'OBELISK_RATE_LIMIT_PER_MIN',
+  'EMBEDDING_PROVIDER',
+  'OPENAI_API_KEY',
 ]
 let saved: Record<string, string | undefined>
 
@@ -50,6 +52,24 @@ describe('loadEnv', () => {
   test('rejects a malformed URL env', () => {
     process.env.OLLAMA_URL = 'not a url'
     expect(() => loadEnv()).toThrow(/must be a valid URL/)
+  })
+
+  describe('embedding provider', () => {
+    test('defaults to ollama', () => {
+      expect(loadEnv().embedding.provider).toBe('ollama')
+    })
+
+    test('rejects an unknown provider', () => {
+      process.env.EMBEDDING_PROVIDER = 'cohere'
+      expect(() => loadEnv()).toThrow(/EMBEDDING_PROVIDER must be/)
+    })
+
+    test('requires OPENAI_API_KEY when provider is openai', () => {
+      process.env.EMBEDDING_PROVIDER = 'openai'
+      expect(() => loadEnv()).toThrow(/OPENAI_API_KEY is required/)
+      process.env.OPENAI_API_KEY = 'sk-test'
+      expect(loadEnv().embedding.provider).toBe('openai')
+    })
   })
 
   describe('dev-mode bind guard', () => {

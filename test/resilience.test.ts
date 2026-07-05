@@ -41,13 +41,13 @@ describe('embed worker — Ollama outage', () => {
     let s = await status(id)
     expect(s.embed_status).toBe('pending') // still pending — drains later
     expect(s.embed_attempts).toBe(0) // outage must NOT burn attempts
-    expect(worker.status().ollamaFailures).toBeGreaterThan(0)
+    expect(worker.status().embedFailures).toBeGreaterThan(0)
 
     down = false
     await worker.tick()
     s = await status(id)
     expect(s.embed_status).toBe('done')
-    expect(worker.status().ollamaFailures).toBe(0) // success clears backoff
+    expect(worker.status().embedFailures).toBe(0) // success clears backoff
   })
 })
 

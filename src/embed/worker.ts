@@ -9,11 +9,11 @@ import { extractRichText, type TextKeysResolver } from './rich'
 import type { CollectionExtraction } from '../lexicon/collection'
 import type { ComponentStatus } from '../health'
 import { logger } from '../log'
-import type { OllamaClient } from './ollama'
+import type { EmbeddingProvider } from './provider'
 
 const MAX_ATTEMPTS = 3
-const OLLAMA_BACKOFF_BASE_MS = 2000
-const OLLAMA_BACKOFF_MAX_MS = 60_000
+const EMBED_BACKOFF_BASE_MS = 2000
+const EMBED_BACKOFF_MAX_MS = 60_000
 const log = logger('embed')
 
 export type ExtractionResolver = (collection: string) => Promise<CollectionExtraction>
@@ -41,12 +41,12 @@ export class EmbedWorker {
   private loopPromise: Promise<void> | null = null
   private lastError: string | null = null
   /** Consecutive Ollama-backend failures — drives backoff and the degraded signal. */
-  private ollamaFailures = 0
+  private embedFailures = 0
 
   constructor(
     private readonly db: Db,
     private readonly config: ObeliskConfig,
-    private readonly ollama: OllamaClient,
+    private readonly embedder: EmbeddingProvider,
     options: EmbedWorkerOptions = {},
   ) {
     this.claimSize = options.claimSize ?? 10
@@ -76,10 +76,10 @@ export class EmbedWorker {
   /**
    * Health snapshot (LAB-54/56): the worker loop is `up` whenever it's running —
    * an Ollama outage is surfaced by the separate `ollama` component (degraded),
-   * not here. `ollamaFailures` exposes how long it's been backing off.
+   * not here. `embedFailures` exposes how long it's been backing off.
    */
   status(): ComponentStatus {
-    return { status: this.stopped ? 'down' : 'up', ollamaFailures: this.ollamaFailures, lastError: this.lastError }
+    return { status: this.stopped ? 'down' : 'up', embedFailures: this.embedFailures, lastError: this.lastError }
   }
 
   private async loop(): Promise<void> {
@@ -92,9 +92,9 @@ export class EmbedWorker {
 
       // Ollama unreachable → exponential backoff so a down backend isn't hammered
       // and CPU isn't burned. Records stay `pending` and drain when it returns.
-      if (this.ollamaFailures > 0) {
-        const backoff = Math.min(OLLAMA_BACKOFF_BASE_MS * 2 ** (this.ollamaFailures - 1), OLLAMA_BACKOFF_MAX_MS)
-        log.warn('ollama unreachable, backing off', { failures: this.ollamaFailures, backoffMs: backoff })
+      if (this.embedFailures > 0) {
+        const backoff = Math.min(EMBED_BACKOFF_BASE_MS * 2 ** (this.embedFailures - 1), EMBED_BACKOFF_MAX_MS)
+        log.warn('embedding backend unreachable, backing off', { failures: this.embedFailures, backoffMs: backoff })
         await Bun.sleep(backoff)
       } else if (processed === 0) {
         await Bun.sleep(this.idleMs)
@@ -117,13 +117,13 @@ export class EmbedWorker {
     for (const { id } of claimed) {
       // Bail the whole batch the moment Ollama is unreachable — no point trying
       // the rest; the loop backs off and re-claims them next round.
-      if ((await this.embedRecord(id)) === 'ollama-down') break
+      if ((await this.embedRecord(id)) === 'backend-down') break
       processed += 1
     }
     return processed
   }
 
-  private async embedRecord(recordId: number): Promise<'ok' | 'skipped' | 'ollama-down'> {
+  private async embedRecord(recordId: number): Promise<'ok' | 'skipped' | 'backend-down'> {
     const row = await this.db
       .select({
         id: records.id,
@@ -163,13 +163,13 @@ export class EmbedWorker {
     // the record's attempts (else an outage would permanently fail the archive).
     let vectors: number[][]
     try {
-      vectors = await this.ollama.embed(chunks)
+      vectors = await this.embedder.embed(chunks)
     } catch (err) {
-      this.ollamaFailures += 1
+      this.embedFailures += 1
       this.lastError = err instanceof Error ? err.message : String(err)
-      return 'ollama-down' // record stays pending; drains when Ollama returns
+      return 'backend-down' // record stays pending; drains when Ollama returns
     }
-    this.ollamaFailures = 0 // a success clears the backoff
+    this.embedFailures = 0 // a success clears the backoff
 
     try {
       await this.db.transaction(async (tx) => {
