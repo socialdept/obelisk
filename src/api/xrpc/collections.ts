@@ -21,6 +21,7 @@ import {
 } from '../../ranking/compile'
 import { localInteractionCount } from '../../ranking/interactions'
 import type { RankingProfile } from '../../ranking/config'
+import type { RepoBackfiller } from '../../ingest/backfill-runner'
 import type { Blocklist } from '../../ingest/blocklist'
 import type { ColdList, ColdPdsList } from '../../ingest/cold'
 import type { PdsBlocklist } from '../../ingest/pds-blocklist'
@@ -85,6 +86,8 @@ export interface XrpcDeps {
   coldList: ColdList
   /** Shared cold PDS list (LAB-68). */
   coldPdsList: ColdPdsList
+  /** Background repo re-index runner. */
+  backfiller: RepoBackfiller
   /** Live-tail concurrency guard (LAB-52). */
   sse?: SseGuard
 }

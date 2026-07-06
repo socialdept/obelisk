@@ -37,6 +37,7 @@ import {
   type ColdList,
   type ColdPdsList,
 } from '../../ingest/cold'
+import type { RepoBackfiller } from '../../ingest/backfill-runner'
 import { blockPds, listBlockedPds, unblockPds, type PdsBlocklist } from '../../ingest/pds-blocklist'
 import { backfillStatus } from '../backfill'
 import { backfillEvents, queryEvents } from '../routes/events'
@@ -72,6 +73,8 @@ export interface ServiceDeps {
   coldList: ColdList
   /** Shared cold PDS list (LAB-68). */
   coldPdsList: ColdPdsList
+  /** Background repo re-index runner. */
+  backfiller: RepoBackfiller
   /** Live-tail concurrency guard (LAB-52). */
   sse?: SseGuard
 }
@@ -144,6 +147,8 @@ export function handleServiceMethod(verb: string, c: XrpcContext, deps: ServiceD
       return getColdDidsList(c, deps)
     case 'getColdPdses':
       return getColdPdsesList(c, deps)
+    case 'getRepoBackfills':
+      return c.json({ running: deps.backfiller.running() })
 
     // ── procedures ───────────────────────────────────────────
     case 'createWebhook':
@@ -185,6 +190,8 @@ export function handleServiceMethod(verb: string, c: XrpcContext, deps: ServiceD
       return respondFromBody(c, (body) => coldPds(deps.db, deps.coldPdsList, body))
     case 'removeColdPds':
       return respondFromBody(c, (body) => unColdPds(deps.db, deps.coldPdsList, body.pattern))
+    case 'backfillRepo':
+      return respondFromBody(c, (body) => Promise.resolve(deps.backfiller.trigger(body)))
     case 'backfillEvents':
       return respondFromBody(c, (body) => backfillEvents(deps.db, body))
 

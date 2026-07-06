@@ -11,6 +11,10 @@ export default {
     'site.standard.graph.subscription': {},
     'site.standard.graph.recommend': {},
   },
+  // Collection globs the archive keeps — mirror Tab's TAB_COLLECTION_FILTERS.
+  // A repo backfill filters to these by default (so it doesn't import a repo's
+  // unrelated app.bsky.* etc.); pass `all` to a backfill to override.
+  collectionFilters: ['site.standard.*'],
   ollama: {
     model: 'nomic-embed-text',
     dimensions: 768,

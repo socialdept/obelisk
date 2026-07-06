@@ -4,7 +4,19 @@ import type { ObeliskConfig } from '../config'
 import type { Db } from '../db/client'
 import { watchedDids } from '../db/schema'
 import { resolvePds } from '../lexicon/resolver'
-import { applyEvent, type RecordEvent } from './upsert'
+import { globToRegExp } from './pds-blocklist'
+import { applyEvent, type ApplyOptions, type RecordEvent } from './upsert'
+
+/**
+ * A predicate matching the collections the archive keeps (LAB-68 follow-up):
+ * `config.collectionFilters` globs if set, else the explicit `collections` keys.
+ * Used to scope a repo backfill so it doesn't import unrelated collections.
+ */
+export function collectionFilter(config: ObeliskConfig): (nsid: string) => boolean {
+  const globs = config.collectionFilters?.length ? config.collectionFilters : Object.keys(config.collections)
+  const res = globs.map(globToRegExp)
+  return (nsid) => res.some((re) => re.test(nsid))
+}
 
 /** One record pulled from a repo CAR — already decoded to atproto-JSON. */
 export interface RepoRecord {
@@ -20,6 +32,8 @@ export interface BackfillResult {
   total: number
   applied: number
   skipped: number
+  /** Records dropped by the `collections` filter (not in the wanted set). */
+  filtered: number
   byCollection: Record<string, number>
 }
 
@@ -37,6 +51,18 @@ export interface BackfillDeps {
   openRepo?: (pds: string, did: string) => AsyncIterable<RepoRecord> | Iterable<RepoRecord>
   batchSize?: number
   onProgress?: (done: number, applied: number) => void
+  /**
+   * Keep only records whose collection matches — records are skipped as they
+   * stream, before any DB work. Defaults to importing every collection (whole
+   * repo). Pass `collectionFilter(config)` to scope to the wanted set.
+   */
+  collections?: (nsid: string) => boolean
+  /**
+   * Forwarded to `applyEvent` per record. Backfill deliberately omits `skipDid`
+   * (it recovers even a blocked repo), but should set `coldDid` so a re-imported
+   * cold repo isn't embedded.
+   */
+  applyOptions?: ApplyOptions
 }
 
 const USER_AGENT = 'obelisk (miguel)'
@@ -70,6 +96,7 @@ export async function backfillRepo(
   let total = 0
   let applied = 0
   let skipped = 0
+  let filtered = 0
   let batch: RecordEvent[] = []
 
   const flush = async () => {
@@ -78,7 +105,7 @@ export async function backfillRepo(
     batch = []
     await db.transaction(async (tx) => {
       for (const event of events) {
-        const result = await applyEvent(tx, config, event)
+        const result = await applyEvent(tx, config, event, deps.applyOptions)
         if (result === 'applied') applied += 1
         else skipped += 1
       }
@@ -87,6 +114,10 @@ export async function backfillRepo(
   }
 
   for await (const entry of entries) {
+    if (deps.collections && !deps.collections(entry.collection)) {
+      filtered += 1
+      continue
+    }
     total += 1
     byCollection[entry.collection] = (byCollection[entry.collection] ?? 0) + 1
     batch.push({
@@ -107,7 +138,7 @@ export async function backfillRepo(
   // Mark the snapshot time for a watched DID (no-op if not watched).
   await db.update(watchedDids).set({ snapshotAt: sql`now()` }).where(eq(watchedDids.did, did))
 
-  return { did, rev, total, applied, skipped, byCollection }
+  return { did, rev, total, applied, skipped, filtered, byCollection }
 }
 
 /**
