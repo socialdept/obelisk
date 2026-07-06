@@ -213,11 +213,11 @@ describe('RepoBackfiller', () => {
     }) as typeof backfillRepo
 
     const runner = new RepoBackfiller(db, testConfig, coldList, new ColdPdsList(db), run)
-    expect(runner.trigger({ did: DID }).data).toMatchObject({ did: DID, status: 'started', scope: 'configured' })
+    expect(runner.trigger({ did: DID })).toMatchObject({ data: { did: DID, status: 'started', scope: 'configured' } })
     await Bun.sleep(10) // let execute() start and enter run()
     expect(runner.running()).toEqual([DID])
     // A second trigger while in-flight is a no-op.
-    expect(runner.trigger({ did: DID }).data).toMatchObject({ status: 'already-running' })
+    expect(runner.trigger({ did: DID })).toMatchObject({ data: { status: 'already-running' } })
 
     // The scoped filter and the cold decision were forwarded.
     expect(captured?.collections?.('site.standard.document')).toBe(true)
@@ -236,7 +236,7 @@ describe('RepoBackfiller', () => {
       return { did: DID, rev: REV, total: 0, applied: 0, skipped: 0, filtered: 0, byCollection: {} }
     }) as typeof backfillRepo
     const runner = new RepoBackfiller(db, testConfig, new ColdList(), new ColdPdsList(db), run)
-    expect(runner.trigger({ did: DID, all: true }).data).toMatchObject({ scope: 'all' })
+    expect(runner.trigger({ did: DID, all: true })).toMatchObject({ data: { scope: 'all' } })
     await Bun.sleep(10)
     expect(captured?.collections).toBeUndefined()
   })
