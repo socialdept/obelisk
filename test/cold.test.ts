@@ -188,6 +188,22 @@ describe('ColdPdsList (forward-only)', () => {
   })
 })
 
+describe('aggregate filters by cold', () => {
+  test('where cold eq true counts only cold records', async () => {
+    coldList.addLocal(COLD)
+    await applyEvent(db, testConfig, makeEvent({ did: COLD, rkey: 'a' }), { coldDid: coldDidFn })
+    await applyEvent(db, testConfig, makeEvent({ did: WARM, rkey: 'b' }), { coldDid: coldDidFn })
+
+    const res = await app.request(`/xrpc/${NS}.aggregate`, {
+      method: 'POST',
+      headers: AUTH,
+      body: JSON.stringify({ groupBy: 'collection', where: { cold: { eq: true } } }),
+    })
+    const { groups } = (await res.json()) as { groups: { key: Record<string, string>; count: number }[] }
+    expect(groups.reduce((s, g) => s + g.count, 0)).toBe(1)
+  })
+})
+
 describe('ColdList.load', () => {
   test('loads DIDs from the table', async () => {
     await db.execute(sql`INSERT INTO cold_dids (did) VALUES (${COLD}), ('did:plc:two')`)

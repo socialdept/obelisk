@@ -37,6 +37,7 @@ const SYSTEM_FIELDS: Record<string, SQL> = {
   rev: sql`${records.rev}`,
   lang: sql`${records.lang}`,
   indexedAt: sql`${records.indexedAt}::text`,
+  cold: sql`${records.cold}::text`,
 }
 
 export function whereFilters(where: WhereClause): SQL[] | { error: string } {
