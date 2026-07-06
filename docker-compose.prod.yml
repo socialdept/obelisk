@@ -28,6 +28,9 @@ services:
       - "443:443"
     environment:
       OBELISK_DOMAIN: ${OBELISK_DOMAIN:?set OBELISK_DOMAIN in .env for TLS}
+      # Optional: enables the console vhost (obelisk-console, separate stack).
+      # Unset → a harmless localhost no-op block. See the console repo's README.
+      CONSOLE_DOMAIN: ${CONSOLE_DOMAIN:-localhost}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddydata:/data
