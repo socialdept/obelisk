@@ -11,6 +11,7 @@ import {
   deleteAudience,
   getAudience,
   listAudiences,
+  previewAudience,
   updateAudience,
 } from '../../audiences/manage'
 import {
@@ -135,6 +136,9 @@ export function handleServiceMethod(verb: string, c: XrpcContext, deps: ServiceD
       return respondFromBody(c, (body) => deleteWebhook(deps.db, body.id))
     case 'testWebhook':
       return respondFromBody(c, (body) => testWebhook(deps.db, body.id, deps.fetchFn))
+    case 'previewAudience':
+      // Read-only, but takes a definition body — POST like aggregate does.
+      return respondFromBody(c, (body) => previewAudience(deps.db, body.definition, { limit: body.limit }))
     case 'createAudience':
       return respondFromBody(c, (body) => createAudience(deps.db, body))
     case 'updateAudience':

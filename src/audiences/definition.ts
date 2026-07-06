@@ -91,3 +91,11 @@ export async function listMembers(
   )
   return rows.map((row) => row.did)
 }
+
+/** Total distinct members for a definition (drives the audience-builder count). */
+export async function countMembers(db: Db, definition: AudienceDefinition): Promise<number> {
+  const rows = await db.execute<{ n: string }>(
+    sql`SELECT count(*) AS n FROM (${memberDidsQuery(definition)}) m`,
+  )
+  return Number(rows[0]?.n ?? 0)
+}
