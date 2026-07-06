@@ -196,7 +196,16 @@ bun run scripts/backfill-repo.ts did:plc:… --all    # every collection in the 
 
 **Scoped by default.** Backfill goes straight to the PDS, so it bypasses Tab's `TAB_COLLECTION_FILTERS`; to avoid dragging in a repo's unrelated collections (all its `app.bsky.*` likes/follows/posts) it filters to `config.collectionFilters` (e.g. `site.standard.*`) — pass `--all` / `{all:true}` to import the whole repo. It also **bypasses the blocklist** (that's the point — it recovers a repo you'd previously blocked) but **honors the cold lists**, so re-importing a cold repo lands its records unembedded.
 
-Every record is stamped with the repo's commit `rev`, so the import is **idempotent** (re-run = no-op) and a newer live event always wins over the snapshot — a forward delete is never resurrected. Records land `embed_status='pending'` (or `skipped` if cold); the running app's embed worker fills embeddings for the ones with prose. If the DID is in `watched_dids`, `snapshot_at` is stamped on success (the "deleted coverage starts here" bound `getFootprint` reports). The CAR is **streamed** and parsed incrementally with `@atcute/repo`'s `fromStream` (Bun-native; `@atproto/repo` pulls a `@noble/hashes` export Bun can't resolve), so memory stays bounded regardless of repo size — a large DID won't OOM a small box (LAB-57). The commit `rev` comes from a cheap `com.atproto.sync.getLatestCommit` call, since the streamed reader consumes the commit block internally.
+Every record is stamped with the repo's commit `rev`, so the import is **idempotent** (re-run = no-op) and a newer live event always wins over the snapshot — a forward delete is never resurrected. Records land `embed_status='pending'` (or `skipped` if cold); the running app's embed worker fills embeddings for the ones with prose.
+
+**Whole-PDS reindex.** To recover every repo on a host (e.g. what a PDS blocklist dropped), enumerate the PDS's repos via `com.atproto.sync.listRepos` and reindex each — no relay needed:
+
+```bash
+bun run scripts/backfill-pds.ts https://pds.example.com          # configured collections
+bun run scripts/backfill-pds.ts https://pds.example.com --all    # every collection
+```
+
+Runs **sequentially** (one repo at a time — a 1GB box can't stream thousands of CARs at once), scoped + cold-aware like `backfill-repo`. One failing repo is logged and skipped; the sweep continues. Idempotent, so re-running after an interruption is safe (it re-scans but re-applies nothing already current). If the DID is in `watched_dids`, `snapshot_at` is stamped on success (the "deleted coverage starts here" bound `getFootprint` reports). The CAR is **streamed** and parsed incrementally with `@atcute/repo`'s `fromStream` (Bun-native; `@atproto/repo` pulls a `@noble/hashes` export Bun can't resolve), so memory stays bounded regardless of repo size — a large DID won't OOM a small box (LAB-57). The commit `rev` comes from a cheap `com.atproto.sync.getLatestCommit` call, since the streamed reader consumes the commit block internally.
 
 ### Filtering by record content
 
