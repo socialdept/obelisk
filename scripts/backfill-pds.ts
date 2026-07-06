@@ -89,9 +89,12 @@ for await (const did of listRepos(pds)) {
     applied += result.applied
     filtered += result.filtered
 
-    // Persist the DID to the cold list only if it actually contributed records —
-    // no point cooling the thousands of repos on a bridge that carry nothing we keep.
-    if (setCold && result.applied > 0) {
+    // Cool every repo that carries records we keep — new OR already-indexed. `total`
+    // counts wanted-collection records even when they're all already current (a
+    // re-run applies 0), so an account that was hot gets flipped: coldDid purges its
+    // embeddings and marks it cold. `total === 0` (e.g. a bridge's empty repos) is
+    // left untouched, so the cold list doesn't fill with entries carrying nothing.
+    if (setCold && result.total > 0) {
       await coldDid(db, coldList, { did, note })
       cooled += 1
     }
