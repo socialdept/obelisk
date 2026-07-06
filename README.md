@@ -207,7 +207,10 @@ bun run scripts/backfill-pds.ts https://pds.example.com                         
 bun run scripts/backfill-pds.ts https://pds.example.com --all                      # every collection
 bun run scripts/backfill-pds.ts https://pds.example.com --cold                     # archive, never embed
 bun run scripts/backfill-pds.ts https://pds.example.com --cold --note "a bridge"   # …with a note on each cold entry
+bun run scripts/backfill-pds.ts https://pds.example.com --skip 635                 # resume after an interruption
 ```
+
+**`--skip <n>`** resumes a sweep — `listRepos` is stably ordered, so it fast-skips the first n repos. The printed `[index]` counts skipped repos, so if a long run dies at `[635]`, re-run with `--skip 635` to pick up at `[636]`. For long sweeps, run it detached (`tmux`, or `docker compose exec -d`) so an SSH drop doesn't kill it.
 
 Runs **sequentially** (one repo at a time — a 1GB box can't stream thousands of CARs at once), scoped + cold-aware like `backfill-repo`. One failing repo is logged and skipped; the sweep continues. Idempotent, so re-running after an interruption is safe (it re-scans but re-applies nothing already current).
 
