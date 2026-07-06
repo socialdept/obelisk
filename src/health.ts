@@ -39,13 +39,17 @@ export async function readyReport(db: Db, providers: HealthProviders = {}): Prom
     components.db = { status: 'down', error: err instanceof Error ? err.message : String(err) }
   }
 
-  // Embed queue depth is a useful gauge and cheap; skip silently if the DB is out.
+  // Embed queue depth gauge — /metrics and /readyz call this on every scrape, so it
+  // must stay cheap. A single `count(*) FILTER(...)` for both statuses forces a full
+  // heap scan (can't use a partial index); split into two per-status counts so each
+  // rides its partial index (records_embed_pending_idx / records_embed_failed_idx) as
+  // an index-only scan. Skip silently if the DB is out.
   if (components.db?.status === 'up') {
     try {
       const rows = await db.execute<{ pending: string; failed: string }>(sql`
-        SELECT count(*) FILTER (WHERE embed_status = 'pending') AS pending,
-               count(*) FILTER (WHERE embed_status = 'failed') AS failed
-        FROM records
+        SELECT
+          (SELECT count(*) FROM records WHERE embed_status = 'pending') AS pending,
+          (SELECT count(*) FROM records WHERE embed_status = 'failed') AS failed
       `)
       components.embedQueue = {
         status: 'up',

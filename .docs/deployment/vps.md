@@ -12,9 +12,11 @@ safely.
 
 ## 0. Prerequisites
 
-- A small VPS. The sizing floor is what LAB-9 (stress test) validates; budget
-  **~2 GB RAM** to start — Ollama's CPU embedding is the memory driver. Docker +
-  Docker Compose v2 installed.
+- A small VPS. Budget **~2 GB RAM** with local Ollama — its CPU embedding is the
+  memory driver. To run on a **~1 GB box**, offload embeddings to an
+  OpenAI-compatible API (`EMBEDDING_PROVIDER=openai` + `OPENAI_API_KEY`, see
+  `.env.example`); that drops the Ollama container and its RAM. Docker + Docker
+  Compose v2 installed.
 - A domain you control, with an **A record pointed at the box's IP** *before*
   first boot (Caddy needs it to solve the ACME challenge).
 
@@ -44,6 +46,9 @@ Edit `.env`:
 - `POSTGRES_PASSWORD` — generate one: `openssl rand -hex 32`. **Required** by the
   production overlay; `up` fails fast without it.
 - `OBELISK_DOMAIN` — the domain whose A record you pointed at the box.
+- `CONSOLE_DOMAIN` — *optional*; only if you're also deploying the operator console
+  (§8). Set it to the console's subdomain to enable that Caddy vhost; unset it
+  defaults to a harmless `localhost` no-op.
 - Review the rate-limit / body-cap / timeout knobs (sane defaults are applied if
   omitted). Leave `OBELISK_DEV_MODE` unset — it disables auth and the app refuses
   to boot with it on a non-loopback bind anyway.
@@ -127,6 +132,15 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build ap
 Migrations run on boot. Zero-downtime isn't a goal (single unit) — a brief
 restart is fine.
 
+**Reboots (OS upgrades, kernel).** Restart-safe with no manual steps: every
+service is `restart: unless-stopped`, `app` waits for a healthy `postgres` before
+starting, migrations run on boot, and all state is on volumes. Tab resumes from
+its cursor and the ingester redelivers unacked events idempotently. Just
+`apt upgrade && reboot` — don't `docker compose down` first (that removes the
+compose network the console joins). One caveat: an in-flight ad-hoc job
+(`backfill-pds` sweep, `backfillRepo`) is in-memory and won't resume — re-run it
+(the sweep with `--skip N`).
+
 **Rollback:** migrations are forward-only. To undo a bad release, check out the
 previous tag and rebuild; if a *migration* must be undone, restore the most
 recent pre-upgrade backup (§5).
@@ -145,6 +159,29 @@ recent pre-upgrade backup (§5).
   only the app (loopback) and Caddy (public) are reachable. Keep it that way.
 - **TLS** is Caddy (auto Let's Encrypt). Swapping it for nginx/Traefik only
   changes the proxy layer; the app is unaware.
+
+## 8. Operator console (obelisk-console)
+
+Optional. The console is a **separate repo/stack** ([obelisk-console](https://github.com/socialdept/obelisk-console))
+that rides this box's Caddy — a second Caddy can't also bind 80/443. So the archive
+side only does two things; the rest lives in the console repo's README.
+
+1. **DNS** — an A record for the console subdomain (e.g. `console.obelisk.socialde.pt`)
+   → this box.
+2. **Enable the vhost here** — set `CONSOLE_DOMAIN` in this stack's `.env` (§2) and
+   re-up Caddy:
+
+   ```bash
+   echo 'CONSOLE_DOMAIN=console.obelisk.socialde.pt' >> .env
+   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d caddy
+   ```
+
+   Caddy then issues a cert for the subdomain and reverse-proxies it to `console:3000`.
+
+The console's own compose joins this stack's `obelisk_default` network (so Caddy can
+reach it, and the console can hit the archive internally at `http://app:6060`), mints
+its own bearer token here (`create-token.ts console`), and gates login to an operator
+DID allowlist. Full steps: the console repo README's **Deploy** section.
 
 ## Component map
 
