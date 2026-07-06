@@ -40,6 +40,10 @@ export const records = pgTable(
     lang: varchar('lang', { length: 20 }),
     embedStatus: varchar('embed_status', { length: 20 }).notNull().default('skipped'),
     embedAttempts: integer('embed_attempts').notNull().default(0),
+    // Cold-storage flag (LAB-68): archived + keyword-searchable, but excluded from
+    // embedding. Set at ingest from the cold DID/PDS lists; maintained retroactively
+    // when a DID is (un)cooled. Drives the `excludeCold` search filter.
+    cold: boolean('cold').notNull().default(false),
     extractedTitle: text('extracted_title'),
     extractedText: text('extracted_text'),
     indexedAt: timestamp('indexed_at', { withTimezone: true }).notNull().defaultNow(),
@@ -230,6 +234,25 @@ export const blockedPdses = pgTable('blocked_pdses', {
 })
 
 export type BlockedPdsRow = typeof blockedPdses.$inferSelect
+
+export const coldDids = pgTable('cold_dids', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  did: varchar('did', { length: 255 }).notNull().unique(),
+  note: text('note'),
+  addedAt: timestamp('added_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export type ColdDidRow = typeof coldDids.$inferSelect
+
+export const coldPdses = pgTable('cold_pdses', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  // Glob pattern over the PDS URL, e.g. https://*.pds.host.
+  pattern: text('pattern').notNull().unique(),
+  note: text('note'),
+  addedAt: timestamp('added_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export type ColdPdsRow = typeof coldPdses.$inferSelect
 
 export const didPds = pgTable('did_pds', {
   did: varchar('did', { length: 255 }).primaryKey(),

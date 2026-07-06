@@ -150,6 +150,11 @@ Obelisk's own cross-collection / archive operations, under the owned authority `
 | `removeBlockedDid` | `{did}` | Un-block (does not restore purged records) |
 | `addBlockedPds` | `{pattern, note?}` | **Deny-list a PDS** by wildcard pattern (`https://*.pds.host`). Events carry only the DID, so each DID's PDS is resolved (via its DID doc, cached in `did_pds` on a TTL) and matched; matches are never archived. Future-block only; resolution failure → archived. Effective immediately |
 | `removeBlockedPds` | `{pattern}` | Remove a PDS pattern |
+| `addColdDid` | `{did, note?}` | **Cold-storage a repo** (LAB-68) — still ingested, indexed, and keyword-searchable, but never embedded (no CPU/$ spent on vectors). Retroactive: existing records are flagged `cold` + `embed_status='skipped'` and their embeddings purged to reclaim vector storage. Returns `{cold, cooled, embeddingsPurged}` |
+| `removeColdDid` | `{did}` | Un-cool — clears the flag and re-queues the repo's records for embedding. Returns `{warmed, requeued}` |
+| `addColdPds` | `{pattern, note?}` | **Cold-storage a PDS** by wildcard pattern (like `addBlockedPds`, resolved via `did_pds`). Forward-only: cools *new/changed* records from a matching PDS; already-archived records aren't retroactively swept |
+| `removeColdPds` | `{pattern}` | Remove a cold PDS pattern |
+| `getColdDids` / `getColdPdses` | — | List the cold DID / PDS entries |
 | `backfillEvents` | `{collection?, did?, where?, includeDeleted?}` | Seed synthetic `create` (or `delete`) events for archived records that predate the event log, so a `cursor=start` consumer sees them. Idempotent (`NOT EXISTS` guard); `live:false` marks them historical. Returns `{seeded}` |
 
 ```bash
@@ -165,7 +170,10 @@ curl -H "$A" "localhost:6060/xrpc/social.dept.obelisk.getRankedFeed?feed=followi
 curl -X POST -H "$A" "localhost:6060/xrpc/social.dept.obelisk.addWatchedDid" -d '{"did": "did:plc:…"}'
 curl -X POST -H "$A" "localhost:6060/xrpc/social.dept.obelisk.addBlockedDid" -d '{"did": "did:plc:spammer", "purge": true}'
 curl -X POST -H "$A" "localhost:6060/xrpc/social.dept.obelisk.addBlockedPds" -d '{"pattern": "https://*.pds.host"}'
+curl -X POST -H "$A" "localhost:6060/xrpc/social.dept.obelisk.addColdDid" -d '{"did": "did:plc:highvolume", "note": "archive only"}'
 ```
+
+**Cold storage vs. blocking.** A *blocked* DID/PDS is dropped — its events never land. A *cold* DID/PDS is fully archived and keyword-searchable, it just skips embedding to save CPU/$. `searchRecords` **hides cold records by default** (pass `includeCold: true` to surface them); semantic search excludes them intrinsically (no embeddings). Browsing (`getRecords`) is unaffected — an explicit `did`/`uri` query still returns everything.
 
 ### Backfill progress
 

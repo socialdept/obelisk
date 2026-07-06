@@ -32,6 +32,8 @@ type Tx = Db | Parameters<Parameters<Db['transaction']>[0]>[0]
 export interface ApplyOptions {
   /** Drop a DID's event before archiving — DID blocklist ∪ PDS blocklist (LAB-47/48). */
   skipDid?: (did: string) => boolean
+  /** Archive but never embed a DID's records — cold DID ∪ cold PDS list (LAB-68). */
+  coldDid?: (did: string) => boolean
 }
 
 export async function applyEvent(
@@ -69,7 +71,7 @@ export async function applyEvent(
   const result =
     event.action === 'delete'
       ? await applyDelete(tx, event, existing?.id)
-      : await applyWrite(tx, config, event, existing)
+      : await applyWrite(tx, config, event, existing, opts.coldDid?.(event.did) ?? false)
 
   if (paths.size > 0) {
     // A deleted record contributes nothing; a written one contributes its links.
@@ -112,19 +114,22 @@ async function applyWrite(
   config: ObeliskConfig,
   event: RecordEvent,
   existing: { id: number; cid: string | null } | undefined,
+  cold: boolean,
 ): Promise<UpsertResult> {
   const contentChanged = !existing || existing.cid !== event.cid
 
-  // Every changed record goes through the extraction worker — whether it has
-  // prose is decided there from the collection's lexicon, not config.
+  // A changed record is queued for the extraction worker (whether it has prose is
+  // decided there from the collection's lexicon) — unless the DID/PDS is cold, in
+  // which case it's archived + FTS-indexed but never embedded (LAB-68).
   const row = {
     cid: event.cid,
     rev: event.rev,
     record: event.record ?? {},
     lang: detectLanguage(event.record),
+    cold,
     deletedAt: null,
     indexedAt: new Date(),
-    ...(contentChanged && { embedStatus: 'pending', embedAttempts: 0 }),
+    ...(contentChanged && { embedStatus: cold ? 'skipped' : 'pending', embedAttempts: 0 }),
   }
 
   let recordId: number

@@ -3,6 +3,7 @@ import type { Db } from '../db/client'
 import type { ComponentStatus } from '../health'
 import { logger } from '../log'
 import type { Blocklist } from './blocklist'
+import type { ColdList, ColdPdsList } from './cold'
 import type { PdsBlocklist } from './pds-blocklist'
 import { applyEvent, type RecordEvent } from './upsert'
 
@@ -51,6 +52,10 @@ export class Ingester {
     private readonly blocklist?: Blocklist,
     /** Shared PDS deny-list (LAB-48); pre-resolved per batch, skipped at apply time. */
     private readonly pdsBlocklist?: PdsBlocklist,
+    /** Shared cold DID list (LAB-68); cold DIDs are archived but never embedded. */
+    private readonly coldList?: ColdList,
+    /** Shared cold PDS list (LAB-68); pre-resolved per batch like the PDS deny-list. */
+    private readonly coldPdsList?: ColdPdsList,
   ) {
     this.batchSize = options.batchSize ?? 200
     this.flushMs = options.flushMs ?? 500
@@ -169,17 +174,21 @@ export class Ingester {
     // Pre-resolve the batch's DIDs against the PDS deny-list (network) OUTSIDE the
     // transaction, so the per-event skip check stays synchronous. No-op when no
     // PDS patterns are configured.
-    await this.pdsBlocklist?.ensureDecided(new Set(batch.map((b) => b.event.did)))
+    const batchDids = new Set(batch.map((b) => b.event.did))
+    await this.pdsBlocklist?.ensureDecided(batchDids)
+    await this.coldPdsList?.ensureDecided(batchDids)
 
     const skipDid = (did: string) =>
       (this.blocklist?.has(did) ?? false) || (this.pdsBlocklist?.isBlocked(did) ?? false)
+    const coldDid = (did: string) =>
+      (this.coldList?.has(did) ?? false) || (this.coldPdsList?.isCold(did) ?? false)
 
     let attempt = 0
     for (;;) {
       try {
         await this.db.transaction(async (tx) => {
           for (const { event } of batch) {
-            const result = await applyEvent(tx, this.config, event, { skipDid })
+            const result = await applyEvent(tx, this.config, event, { skipDid, coldDid })
             if (result === 'applied') this.stats.applied += 1
             else this.stats.skipped += 1
           }
