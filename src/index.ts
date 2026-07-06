@@ -5,6 +5,7 @@ import { migrate } from './db/migrate'
 import { createEmbeddingProvider } from './embed/provider'
 import { EmbedWorker } from './embed/worker'
 import { Blocklist } from './ingest/blocklist'
+import { ColdList, ColdPdsList } from './ingest/cold'
 import { Ingester } from './ingest/ingester'
 import { PdsBlocklist } from './ingest/pds-blocklist'
 import { TabAdmin } from './ingest/tab-admin'
@@ -29,7 +30,12 @@ const blocklist = new Blocklist()
 await blocklist.load(db)
 const pdsBlocklist = new PdsBlocklist(db, undefined, (config.identity?.didPdsCacheTtlSeconds ?? 86_400) * 1000)
 await pdsBlocklist.loadPatterns()
-const ingester = new Ingester(db, config, {}, blocklist, pdsBlocklist)
+// Shared cold-storage lists (LAB-68): cold DIDs/PDSes are archived but never embedded.
+const coldList = new ColdList()
+await coldList.load(db)
+const coldPdsList = new ColdPdsList(db, undefined, (config.identity?.didPdsCacheTtlSeconds ?? 86_400) * 1000)
+await coldPdsList.loadPatterns()
+const ingester = new Ingester(db, config, {}, blocklist, pdsBlocklist, coldList, coldPdsList)
 const embedWorker = new EmbedWorker(db, config, embedder, {
   claimSize: env.embedBatchSize,
   textKeys: createTextKeysResolver(lexicons),
@@ -70,6 +76,8 @@ const app = createApp({
   tabAdmin,
   blocklist,
   pdsBlocklist,
+  coldList,
+  coldPdsList,
   limits: env.limits,
   health: {
     ingester: () => ingester.status(),

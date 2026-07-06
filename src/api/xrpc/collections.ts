@@ -22,6 +22,7 @@ import {
 import { localInteractionCount } from '../../ranking/interactions'
 import type { RankingProfile } from '../../ranking/config'
 import type { Blocklist } from '../../ingest/blocklist'
+import type { ColdList, ColdPdsList } from '../../ingest/cold'
 import type { PdsBlocklist } from '../../ingest/pds-blocklist'
 import type { SseGuard } from '../ratelimit'
 import { computeFacets, highlightExpr, type FacetBucket } from '../routes/search-enrich'
@@ -42,6 +43,12 @@ interface QueryBody {
   ranking?: string
   highlight?: boolean
   facets?: string[]
+  /** Exclude cold-storage records (LAB-68). searchRecords sets this by default
+   *  (cold is hidden unless `includeCold`); getRecords/countRecords honor it raw
+   *  (default off). Semantic search excludes cold intrinsically — no embeddings. */
+  excludeCold?: boolean
+  /** searchRecords only: surface cold-storage records that are hidden by default. */
+  includeCold?: boolean
 }
 
 const RRF_K = 60
@@ -74,6 +81,10 @@ export interface XrpcDeps {
   blocklist: Blocklist
   /** Shared PDS deny-list (LAB-48). */
   pdsBlocklist: PdsBlocklist
+  /** Shared cold DID list (LAB-68). */
+  coldList: ColdList
+  /** Shared cold PDS list (LAB-68). */
+  coldPdsList: ColdPdsList
   /** Live-tail concurrency guard (LAB-52). */
   sse?: SseGuard
 }
@@ -190,7 +201,10 @@ async function searchRecords(
     return xrpcError(c, 400, 'InvalidRequest', 'q is required')
   }
 
-  const built = buildFilters(collection, body)
+  // Search hides cold-storage records by default (LAB-68) — pass includeCold to
+  // surface them. Browsing (getRecords/countRecords) is unaffected: an explicit
+  // did/uri query still returns everything.
+  const built = buildFilters(collection, { ...body, excludeCold: !body.includeCold })
   if ('error' in built) return xrpcError(c, 400, 'InvalidRequest', built.error)
   const limit = clampLimit(body.limit, 50, MAX_LIMIT)
 
@@ -414,6 +428,7 @@ async function runRanked(
 function buildFilters(collection: string, body: QueryBody): { filters: SQL[] } | { error: string } {
   const filters: SQL[] = [eq(records.collection, collection)]
   if (!body.includeDeleted) filters.push(isNull(records.deletedAt))
+  if (body.excludeCold) filters.push(eq(records.cold, false))
 
   if (body.where) {
     const parsed = whereFilters(body.where)

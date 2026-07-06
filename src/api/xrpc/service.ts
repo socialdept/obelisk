@@ -27,6 +27,16 @@ import { runAggregate, type AggregateInput } from '../routes/aggregate'
 import { rankedFeed, type RankedFeedInput } from '../routes/feed'
 import { subscribeEvents } from '../routes/subscribe'
 import { blockDid, listBlocked, unblockDid, type Blocklist } from '../../ingest/blocklist'
+import {
+  coldDid,
+  coldPds,
+  listColdDids,
+  listColdPdses,
+  unColdDid,
+  unColdPds,
+  type ColdList,
+  type ColdPdsList,
+} from '../../ingest/cold'
 import { blockPds, listBlockedPds, unblockPds, type PdsBlocklist } from '../../ingest/pds-blocklist'
 import { backfillStatus } from '../backfill'
 import { backfillEvents, queryEvents } from '../routes/events'
@@ -58,6 +68,10 @@ export interface ServiceDeps {
   blocklist: Blocklist
   /** Shared PDS deny-list (LAB-48). */
   pdsBlocklist: PdsBlocklist
+  /** Shared cold DID list (LAB-68). */
+  coldList: ColdList
+  /** Shared cold PDS list (LAB-68). */
+  coldPdsList: ColdPdsList
   /** Live-tail concurrency guard (LAB-52). */
   sse?: SseGuard
 }
@@ -126,6 +140,10 @@ export function handleServiceMethod(verb: string, c: XrpcContext, deps: ServiceD
       return getBlockedDids(c, deps)
     case 'getBlockedPdses':
       return getBlockedPdses(c, deps)
+    case 'getColdDids':
+      return getColdDidsList(c, deps)
+    case 'getColdPdses':
+      return getColdPdsesList(c, deps)
 
     // ── procedures ───────────────────────────────────────────
     case 'createWebhook':
@@ -159,6 +177,14 @@ export function handleServiceMethod(verb: string, c: XrpcContext, deps: ServiceD
       return respondFromBody(c, (body) => blockPds(deps.db, deps.pdsBlocklist, body))
     case 'removeBlockedPds':
       return respondFromBody(c, (body) => unblockPds(deps.db, deps.pdsBlocklist, body.pattern))
+    case 'addColdDid':
+      return respondFromBody(c, (body) => coldDid(deps.db, deps.coldList, body))
+    case 'removeColdDid':
+      return respondFromBody(c, (body) => unColdDid(deps.db, deps.coldList, body.did))
+    case 'addColdPds':
+      return respondFromBody(c, (body) => coldPds(deps.db, deps.coldPdsList, body))
+    case 'removeColdPds':
+      return respondFromBody(c, (body) => unColdPds(deps.db, deps.coldPdsList, body.pattern))
     case 'backfillEvents':
       return respondFromBody(c, (body) => backfillEvents(deps.db, body))
 
@@ -338,4 +364,12 @@ async function getBlockedDids(c: XrpcContext, { db }: ServiceDeps) {
 
 async function getBlockedPdses(c: XrpcContext, { db }: ServiceDeps) {
   return c.json({ blockedPdses: await listBlockedPds(db) })
+}
+
+async function getColdDidsList(c: XrpcContext, { db }: ServiceDeps) {
+  return c.json({ coldDids: await listColdDids(db) })
+}
+
+async function getColdPdsesList(c: XrpcContext, { db }: ServiceDeps) {
+  return c.json({ coldPdses: await listColdPdses(db) })
 }

@@ -5,6 +5,7 @@ import type { Db } from '../db/client'
 import { metricsText, readyReport, type HealthProviders } from '../health'
 import type { EmbeddingProvider } from '../embed/provider'
 import { Blocklist } from '../ingest/blocklist'
+import { ColdList, ColdPdsList } from '../ingest/cold'
 import { PdsBlocklist } from '../ingest/pds-blocklist'
 import { TabAdmin } from '../ingest/tab-admin'
 import { LexiconRegistry } from '../lexicon/registry'
@@ -28,6 +29,10 @@ export interface ApiDeps {
   blocklist?: Blocklist
   /** Shared PDS deny-list (LAB-48). Defaults to an empty in-memory list. */
   pdsBlocklist?: PdsBlocklist
+  /** Shared cold DID list (LAB-68). Defaults to an empty in-memory list. */
+  coldList?: ColdList
+  /** Shared cold PDS list (LAB-68). Defaults to an empty in-memory list. */
+  coldPdsList?: ColdPdsList
   /** Abuse guards (LAB-52). Defaults to UNLIMITED (off) — production passes real values. */
   limits?: Limits
   /** Live component snapshots for /readyz + /metrics (LAB-54). */
@@ -44,7 +49,7 @@ export interface ApiDeps {
  *
  * Bearer-authed unless devMode.
  */
-export function createApp({ db, config, ollama, constellation, lexicons, tabAdmin, fetchFn, blocklist, pdsBlocklist, limits, health, devMode }: ApiDeps): Hono {
+export function createApp({ db, config, ollama, constellation, lexicons, tabAdmin, fetchFn, blocklist, pdsBlocklist, coldList, coldPdsList, limits, health, devMode }: ApiDeps): Hono {
   const app = new Hono()
 
   // Liveness — cheap, unauthenticated, no dependency checks: is the process up?
@@ -70,6 +75,8 @@ export function createApp({ db, config, ollama, constellation, lexicons, tabAdmi
   const tab = tabAdmin ?? new TabAdmin(undefined)
   const denyList = blocklist ?? new Blocklist()
   const pdsDenyList = pdsBlocklist ?? new PdsBlocklist(db)
+  const coldDids = coldList ?? new ColdList()
+  const coldPdses = coldPdsList ?? new ColdPdsList(db)
   const lim = limits ?? UNLIMITED
   const limiter = new RateLimiter()
 
@@ -96,6 +103,8 @@ export function createApp({ db, config, ollama, constellation, lexicons, tabAdmi
       fetchFn,
       blocklist: denyList,
       pdsBlocklist: pdsDenyList,
+      coldList: coldDids,
+      coldPdsList: coldPdses,
       sse: { limiter, max: lim.maxSseConnections },
     }),
   )
