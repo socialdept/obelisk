@@ -198,6 +198,8 @@ bun run scripts/backfill-repo.ts did:plc:… --all    # every collection in the 
 
 Every record is stamped with the repo's commit `rev`, so the import is **idempotent** (re-run = no-op) and a newer live event always wins over the snapshot — a forward delete is never resurrected. Records land `embed_status='pending'` (or `skipped` if cold); the running app's embed worker fills embeddings for the ones with prose.
 
+**getRepo-less hosts.** Bridge PDSes (e.g. `atproto.brid.gy`) and relays don't implement `com.atproto.sync.getRepo` — they answer **501**. Backfill detects this and transparently falls back to paging **`com.atproto.repo.listRecords` per collection** (collections discovered via `describeRepo`, or the configured set if that's unavailable too). Records imported this way carry no commit `rev` (there's no CAR); idempotency then rests on the `(did, collection, rkey)` uniqueness + cid comparison. This is what makes reindexing bridged `site.standard.*` repos work.
+
 **Whole-PDS reindex.** To recover every repo on a host (e.g. what a PDS blocklist dropped), enumerate the PDS's repos via `com.atproto.sync.listRepos` and reindex each — no relay needed:
 
 ```bash

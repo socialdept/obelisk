@@ -28,7 +28,8 @@ export interface RepoRecord {
 
 export interface BackfillResult {
   did: string
-  rev: string
+  /** The repo commit rev (getRepo path), or null when imported via listRecords. */
+  rev: string | null
   total: number
   applied: number
   skipped: number
@@ -63,6 +64,10 @@ export interface BackfillDeps {
    * cold repo isn't embedded.
    */
   applyOptions?: ApplyOptions
+  /** Override repo-collection discovery for the listRecords fallback (tests). */
+  describeCollections?: (pds: string, did: string) => Promise<string[]>
+  /** Override the listRecords fallback source (tests). */
+  listRecordsSource?: (pds: string, did: string, collections: string[]) => AsyncIterable<RepoRecord>
 }
 
 const USER_AGENT = 'obelisk (miguel)'
@@ -88,9 +93,32 @@ export async function backfillRepo(
   deps: BackfillDeps = {},
 ): Promise<BackfillResult> {
   const pds = await (deps.resolvePds ?? resolvePds)(did)
-  const rev = await (deps.fetchRev ?? fetchLatestRev)(pds, did)
-  const entries = (deps.openRepo ?? defaultOpenRepo)(pds, did)
+  const openRepo = deps.openRepo ?? defaultOpenRepo
 
+  // Preferred path: getRepo streams the whole repo in one CAR. But bridge PDSes
+  // (atproto.brid.gy) and relays don't implement getRepo/getLatestCommit — they
+  // answer 501. Fall back to paging com.atproto.repo.listRecords per collection,
+  // which every readable host serves (it's how a single record is fetched).
+  try {
+    const rev = await (deps.fetchRev ?? fetchLatestRev)(pds, did)
+    return await applyStream(db, config, did, rev, openRepo(pds, did), deps)
+  } catch (err) {
+    if (!isUnsupported(err)) throw err
+    const collections = await filteredCollections(pds, did, config, deps)
+    const source = deps.listRecordsSource ?? listRecordsSource
+    return applyStream(db, config, did, null, source(pds, did, collections), deps)
+  }
+}
+
+/** Apply a stream of repo records in batched transactions, honoring the collection filter. */
+async function applyStream(
+  db: Db,
+  config: ObeliskConfig,
+  did: string,
+  rev: string | null,
+  entries: AsyncIterable<RepoRecord> | Iterable<RepoRecord>,
+  deps: BackfillDeps,
+): Promise<BackfillResult> {
   const batchSize = deps.batchSize ?? 200
   const byCollection: Record<string, number> = {}
   let total = 0
@@ -139,6 +167,57 @@ export async function backfillRepo(
   await db.update(watchedDids).set({ snapshotAt: sql`now()` }).where(eq(watchedDids.did, did))
 
   return { did, rev, total, applied, skipped, filtered, byCollection }
+}
+
+/** A 501 (Not Implemented) from getRepo/getLatestCommit — the host can't serve a repo export. */
+function isUnsupported(err: unknown): boolean {
+  return err instanceof Error && err.message.includes('→ 501')
+}
+
+/** The repo's collections (describeRepo → configured-keys fallback), filtered to the wanted set. */
+async function filteredCollections(
+  pds: string,
+  did: string,
+  config: ObeliskConfig,
+  deps: BackfillDeps,
+): Promise<string[]> {
+  const discover = deps.describeCollections ?? describeRepoCollections
+  const found = await discover(pds, did).catch(() => [] as string[])
+  const all = found.length ? found : Object.keys(config.collections)
+  return deps.collections ? all.filter(deps.collections) : all
+}
+
+async function describeRepoCollections(pds: string, did: string): Promise<string[]> {
+  const url = `${pds.replace(/\/+$/, '')}/xrpc/com.atproto.repo.describeRepo?repo=${encodeURIComponent(did)}`
+  const res = await fetch(url, { headers: { 'User-Agent': USER_AGENT } })
+  if (!res.ok) throw new Error(`describeRepo ${did} → ${res.status}`)
+  const body = (await res.json()) as { collections?: string[] }
+  return body.collections ?? []
+}
+
+/** Page com.atproto.repo.listRecords for each collection — the getRepo-less fetch path. */
+async function* listRecordsSource(pds: string, did: string, collections: string[]): AsyncIterable<RepoRecord> {
+  const base = pds.replace(/\/+$/, '')
+  for (const collection of collections) {
+    let cursor: string | undefined
+    do {
+      const url = new URL(`${base}/xrpc/com.atproto.repo.listRecords`)
+      url.searchParams.set('repo', did)
+      url.searchParams.set('collection', collection)
+      url.searchParams.set('limit', '100')
+      if (cursor) url.searchParams.set('cursor', cursor)
+      const res = await fetch(url, { headers: { 'User-Agent': USER_AGENT } })
+      if (!res.ok) throw new Error(`listRecords ${did} ${collection} → ${res.status}`)
+      const body = (await res.json()) as {
+        records?: { uri: string; cid: string; value: Record<string, unknown> }[]
+        cursor?: string
+      }
+      for (const rec of body.records ?? []) {
+        yield { collection, rkey: rec.uri.split('/').pop() ?? '', cid: rec.cid, record: rec.value }
+      }
+      cursor = body.cursor
+    } while (cursor)
+  }
 }
 
 /**
