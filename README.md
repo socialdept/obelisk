@@ -156,11 +156,15 @@ Obelisk's own cross-collection / archive operations, under the owned authority `
 | `removeColdPds` | `{pattern}` | Remove a cold PDS pattern |
 | `getColdDids` / `getColdPdses` | — | List the cold DID / PDS entries |
 | `backfillEvents` | `{collection?, did?, where?, includeDeleted?}` | Seed synthetic `create` (or `delete`) events for archived records that predate the event log, so a `cursor=start` consumer sees them. Idempotent (`NOT EXISTS` guard); `live:false` marks them historical. Returns `{seeded}` |
+| `backfillRepo` | `{did, all?}` | **Re-index a repo** from its PDS (`getRepo`) — recover records the live sync missed (e.g. what a blocklist dropped). Runs in the background (returns `{did, status, scope}` immediately). Scoped to `collectionFilters` by default; `all:true` imports every collection. Idempotent, and cold-aware (a cold repo lands unembedded). One backfill per DID at a time |
+| `getRepoBackfills` | — | `{running: [did…]}` — repos currently being re-indexed |
 
 ```bash
 curl -H "$A" "localhost:6060/xrpc/social.dept.obelisk.getEvents?cursor=0&collection=site.standard.document"
 curl -N -H "$A" "localhost:6060/xrpc/social.dept.obelisk.subscribeEvents?cursor=0&collection=site.standard.document"  # live SSE tail
 curl -X POST -H "$A" "localhost:6060/xrpc/social.dept.obelisk.backfillEvents" -d '{"collection": "site.standard.document"}'
+curl -X POST -H "$A" "localhost:6060/xrpc/social.dept.obelisk.backfillRepo" -d '{"did": "did:plc:…"}'          # re-index, configured collections only
+curl -X POST -H "$A" "localhost:6060/xrpc/social.dept.obelisk.backfillRepo" -d '{"did": "did:plc:…", "all": true}'  # whole repo
 curl -H "$A" "localhost:6060/xrpc/social.dept.obelisk.getFootprint?did=did:plc:…&includeDeleted=1"
 curl -H "$A" "localhost:6060/xrpc/social.dept.obelisk.getBackfillStatus?collection=site.standard.document"
 curl -H "$A" "localhost:6060/xrpc/social.dept.obelisk.aggregate?groupBy=collection"
@@ -181,15 +185,18 @@ curl -X POST -H "$A" "localhost:6060/xrpc/social.dept.obelisk.addColdDid" -d '{"
 
 There is **no `%`-of-network** — `reposTotal` is always `null`. No atproto service exposes a per-collection record or repo count (Constellation only counts *backlinks to* a target; `site.standard.document` is a link source, so it's uncountable there), and Tab's tracked-repo count isn't wired yet. `complete` is inferred from the historical stream draining, which is robust to quiet repos but also reads a stalled ingester (Tab down) as done — check `lastHistoricalEventAt` to disambiguate.
 
-### DID-scoped backfill (whole repo, on demand)
+### DID-scoped backfill / re-index (on demand)
 
-Archive a DID's **entire repo across every collection** — independent of the network sync filter — by fetching `com.atproto.sync.getRepo` and replaying every record through the normal ingest path:
+Re-index a DID's repo — recover records the live sync missed, e.g. what a blocklist dropped — by fetching `com.atproto.sync.getRepo` and replaying its records through the normal ingest path. Available as the `backfillRepo` XRPC procedure (runs in the background, one per DID) or the CLI:
 
 ```bash
-bun run scripts/backfill-repo.ts did:plc:…
+bun run scripts/backfill-repo.ts did:plc:…          # configured collections only (default)
+bun run scripts/backfill-repo.ts did:plc:… --all    # every collection in the repo
 ```
 
-Every record is stamped with the repo's commit `rev`, so the import is **idempotent** (re-run = no-op) and a newer live event always wins over the snapshot — a forward delete is never resurrected. Records land `embed_status='pending'`; the running app's embed worker fills embeddings for the ones with prose. If the DID is in `watched_dids`, `snapshot_at` is stamped on success (the "deleted coverage starts here" bound `getFootprint` reports). The CAR is **streamed** and parsed incrementally with `@atcute/repo`'s `fromStream` (Bun-native; `@atproto/repo` pulls a `@noble/hashes` export Bun can't resolve), so memory stays bounded regardless of repo size — a large DID won't OOM a small box (LAB-57). The commit `rev` comes from a cheap `com.atproto.sync.getLatestCommit` call, since the streamed reader consumes the commit block internally.
+**Scoped by default.** Backfill goes straight to the PDS, so it bypasses Tab's `TAB_COLLECTION_FILTERS`; to avoid dragging in a repo's unrelated collections (all its `app.bsky.*` likes/follows/posts) it filters to `config.collectionFilters` (e.g. `site.standard.*`) — pass `--all` / `{all:true}` to import the whole repo. It also **bypasses the blocklist** (that's the point — it recovers a repo you'd previously blocked) but **honors the cold lists**, so re-importing a cold repo lands its records unembedded.
+
+Every record is stamped with the repo's commit `rev`, so the import is **idempotent** (re-run = no-op) and a newer live event always wins over the snapshot — a forward delete is never resurrected. Records land `embed_status='pending'` (or `skipped` if cold); the running app's embed worker fills embeddings for the ones with prose. If the DID is in `watched_dids`, `snapshot_at` is stamped on success (the "deleted coverage starts here" bound `getFootprint` reports). The CAR is **streamed** and parsed incrementally with `@atcute/repo`'s `fromStream` (Bun-native; `@atproto/repo` pulls a `@noble/hashes` export Bun can't resolve), so memory stays bounded regardless of repo size — a large DID won't OOM a small box (LAB-57). The commit `rev` comes from a cheap `com.atproto.sync.getLatestCommit` call, since the streamed reader consumes the commit block internally.
 
 ### Filtering by record content
 

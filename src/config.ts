@@ -17,6 +17,13 @@ export interface CollectionConfig {
 
 export interface ObeliskConfig {
   collections: Record<string, CollectionConfig>
+  /**
+   * Collection globs the archive keeps (mirrors Tab's `TAB_COLLECTION_FILTERS`),
+   * e.g. `['site.standard.*']`. Backfill filters a repo to these by default, so a
+   * repo import doesn't drag in every unrelated collection. Absent → fall back to
+   * the explicit `collections` keys. See `collectionFilter()`.
+   */
+  collectionFilters?: string[]
   /** Named ranking profiles (LAB-37) consumed by search + feed skeleton. Optional. */
   rankings?: RankingConfig
   /** Where the `interactions` signal sources counts per collection (LAB-40). Optional. */

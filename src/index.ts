@@ -4,6 +4,7 @@ import { createDb } from './db/client'
 import { migrate } from './db/migrate'
 import { createEmbeddingProvider } from './embed/provider'
 import { EmbedWorker } from './embed/worker'
+import { RepoBackfiller } from './ingest/backfill-runner'
 import { Blocklist } from './ingest/blocklist'
 import { ColdList, ColdPdsList } from './ingest/cold'
 import { Ingester } from './ingest/ingester'
@@ -35,6 +36,7 @@ const coldList = new ColdList()
 await coldList.load(db)
 const coldPdsList = new ColdPdsList(db, undefined, (config.identity?.didPdsCacheTtlSeconds ?? 86_400) * 1000)
 await coldPdsList.loadPatterns()
+const backfiller = new RepoBackfiller(db, config, coldList, coldPdsList)
 const ingester = new Ingester(db, config, {}, blocklist, pdsBlocklist, coldList, coldPdsList)
 const embedWorker = new EmbedWorker(db, config, embedder, {
   claimSize: env.embedBatchSize,
@@ -78,6 +80,7 @@ const app = createApp({
   pdsBlocklist,
   coldList,
   coldPdsList,
+  backfiller,
   limits: env.limits,
   health: {
     ingester: () => ingester.status(),
