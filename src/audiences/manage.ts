@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { audiences, type AudienceDefinition, type AudienceRow } from '../db/schema'
-import { findAudience, isMember, listMembers, validateDefinition } from './definition'
+import { countMembers, findAudience, isMember, listMembers, validateDefinition } from './definition'
 import { conflict, invalid, notFound, type ManageResult } from '../webhooks/manage'
 
 export async function listAudiences(db: Db): Promise<AudienceRow[]> {
@@ -76,6 +76,27 @@ export async function audienceMembers(
   const offset = Math.max(opts.offset ?? 0, 0)
   const members = await listMembers(db, audience.definition, limit, offset)
   return { data: { name: audience.name, members, limit, offset } }
+}
+
+/**
+ * Resolve an UNSAVED definition to its member count + a sample — powers the
+ * console's live audience builder (preview before you commit). Read-only.
+ */
+export async function previewAudience(
+  db: Db,
+  definition: AudienceDefinition | undefined,
+  opts: { limit?: number } = {},
+): Promise<ManageResult<{ count: number; members: string[]; limit: number }>> {
+  if (!definition) return invalid('definition is required')
+  const problem = validateDefinition(definition)
+  if (problem) return invalid(problem)
+
+  const limit = Math.min(Math.max(opts.limit ?? 25, 1), 100)
+  const [count, members] = await Promise.all([
+    countMembers(db, definition),
+    listMembers(db, definition, limit, 0),
+  ])
+  return { data: { count, members, limit } }
 }
 
 export async function checkMember(

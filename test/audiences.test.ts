@@ -73,6 +73,30 @@ describe('audience membership', () => {
     expect(((await after.json()) as { members: string[] }).members).toEqual(['did:plc:fan1'])
   })
 
+  test('previewAudience resolves an unsaved definition to count + members', async () => {
+    await seedNetwork()
+    const res = await app.request('/xrpc/social.dept.obelisk.previewAudience', {
+      method: 'POST',
+      headers: JSON_AUTH,
+      body: JSON.stringify({
+        definition: { kind: 'backlink', target: PUB_URI, collection: 'site.standard.graph.subscription', path: 'publication' },
+      }),
+    })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { count: number; members: string[] }
+    expect(body.count).toBe(2)
+    expect(body.members).toEqual(['did:plc:fan1', 'did:plc:fan2'])
+  })
+
+  test('previewAudience rejects an invalid definition', async () => {
+    const res = await app.request('/xrpc/social.dept.obelisk.previewAudience', {
+      method: 'POST',
+      headers: JSON_AUTH,
+      body: JSON.stringify({ definition: { kind: 'backlink' } }),
+    })
+    expect(res.status).toBe(400)
+  })
+
   test('collection audience with matchers', async () => {
     await applyEvent(
       db,
