@@ -203,11 +203,15 @@ Every record is stamped with the repo's commit `rev`, so the import is **idempot
 **Whole-PDS reindex.** To recover every repo on a host (e.g. what a PDS blocklist dropped), enumerate the PDS's repos via `com.atproto.sync.listRepos` and reindex each — no relay needed:
 
 ```bash
-bun run scripts/backfill-pds.ts https://pds.example.com          # configured collections
-bun run scripts/backfill-pds.ts https://pds.example.com --all    # every collection
+bun run scripts/backfill-pds.ts https://pds.example.com                            # configured collections
+bun run scripts/backfill-pds.ts https://pds.example.com --all                      # every collection
+bun run scripts/backfill-pds.ts https://pds.example.com --cold                     # archive, never embed
+bun run scripts/backfill-pds.ts https://pds.example.com --cold --note "a bridge"   # …with a note on each cold entry
 ```
 
-Runs **sequentially** (one repo at a time — a 1GB box can't stream thousands of CARs at once), scoped + cold-aware like `backfill-repo`. One failing repo is logged and skipped; the sweep continues. Idempotent, so re-running after an interruption is safe (it re-scans but re-applies nothing already current). If the DID is in `watched_dids`, `snapshot_at` is stamped on success (the "deleted coverage starts here" bound `getFootprint` reports). The CAR is **streamed** and parsed incrementally with `@atcute/repo`'s `fromStream` (Bun-native; `@atproto/repo` pulls a `@noble/hashes` export Bun can't resolve), so memory stays bounded regardless of repo size — a large DID won't OOM a small box (LAB-57). The commit `rev` comes from a cheap `com.atproto.sync.getLatestCommit` call, since the streamed reader consumes the commit block internally.
+Runs **sequentially** (one repo at a time — a 1GB box can't stream thousands of CARs at once), scoped + cold-aware like `backfill-repo`. One failing repo is logged and skipped; the sweep continues. Idempotent, so re-running after an interruption is safe (it re-scans but re-applies nothing already current).
+
+**`--cold`** cools the host as it imports: records land unembedded, and every DID that actually contributed records is added to the cold list (with `--note`, if given) so it stays cold — DIDs with nothing we keep aren't cooled, so a bridge's thousands of empty repos don't clutter the list. This is the one-shot "archive this whole PDS, don't spend embeddings on it" path. If the DID is in `watched_dids`, `snapshot_at` is stamped on success (the "deleted coverage starts here" bound `getFootprint` reports). The CAR is **streamed** and parsed incrementally with `@atcute/repo`'s `fromStream` (Bun-native; `@atproto/repo` pulls a `@noble/hashes` export Bun can't resolve), so memory stays bounded regardless of repo size — a large DID won't OOM a small box (LAB-57). The commit `rev` comes from a cheap `com.atproto.sync.getLatestCommit` call, since the streamed reader consumes the commit block internally.
 
 ### Filtering by record content
 
