@@ -179,6 +179,46 @@ describe('backfillRepo — collection filter', () => {
   })
 })
 
+describe('backfillRepo — listRecords fallback (getRepo 501)', () => {
+  // A getRepo source that 501s on first pull — like atproto.brid.gy / a relay.
+  async function* getRepo501(): AsyncGenerator<RepoRecord> {
+    throw new Error(`getRepo ${DID} → 501`)
+  }
+
+  test('falls back to listRecords, scoped to configured collections, when getRepo is unsupported', async () => {
+    const listed = [
+      rec('site.standard.document', 'd1', { title: 'Bridged doc', textContent: 'via a bridge' }),
+      rec('app.bsky.feed.post', 'p1', { text: 'noise' }), // not a configured collection
+    ]
+    const result = await backfillRepo(db, testConfig, DID, {
+      resolvePds: async () => 'https://atproto.brid.gy',
+      fetchRev: async () => REV,
+      openRepo: () => getRepo501(),
+      describeCollections: async () => ['site.standard.document', 'app.bsky.feed.post'],
+      listRecordsSource: (_pds, _did, collections) =>
+        (async function* () {
+          for (const r of listed) if (collections.includes(r.collection)) yield r
+        })(),
+      collections: collectionFilter(testConfig),
+    })
+
+    // listRecords was asked only for the wanted collection, so p1 never arrives.
+    expect(result).toMatchObject({ applied: 1, filtered: 0 })
+    expect(result.rev).toBeNull() // no commit rev on the listRecords path
+    const rows = await db.select().from(records).where(sql`did = ${DID}`)
+    expect(rows.map((r) => r.collection)).toEqual(['site.standard.document'])
+  })
+
+  test('a non-501 error is not swallowed', async () => {
+    async function* boom(): AsyncGenerator<RepoRecord> {
+      throw new Error(`getRepo ${DID} → 500`)
+    }
+    await expect(
+      backfillRepo(db, testConfig, DID, { resolvePds: async () => 'https://x', fetchRev: async () => REV, openRepo: () => boom() }),
+    ).rejects.toThrow('→ 500')
+  })
+})
+
 describe('backfillRepo — cold-aware', () => {
   test('a cold DID via applyOptions lands records unembedded', async () => {
     await backfillRepo(db, testConfig, DID, {
