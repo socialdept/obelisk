@@ -151,6 +151,7 @@ export async function testWebhook(
         collection: 'site.standard.document',
         rkey: 'test',
         action: 'create',
+        cid: 'bafyreitestobelisksyntheticevent',
         rev: '3test',
         live: true,
         createdAt: new Date().toISOString(),

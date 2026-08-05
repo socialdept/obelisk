@@ -11,7 +11,9 @@ services:
     image: pgvector/pgvector:pg17
     restart: unless-stopped
     ports:
-      - "127.0.0.1:5432:5432"
+      # Host port only — the container always listens on 5432. Override when the
+      # host already runs a Postgres on the default port.
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     environment:
       POSTGRES_DB: obelisk
       POSTGRES_USER: obelisk

@@ -143,6 +143,9 @@ export class WebhookWorker {
       collection: event.collection,
       rkey: event.rkey,
       action: event.action,
+      // The record's current CID — null on a delete (the archived row keeps the
+      // pre-delete cid, which would misidentify the tombstone).
+      cid: event.action === 'delete' ? null : record.cid,
       rev: event.rev,
       live: event.live,
       createdAt: event.createdAt,

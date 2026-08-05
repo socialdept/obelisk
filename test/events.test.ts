@@ -20,6 +20,7 @@ interface EventJson {
   uri: string
   action: string
   collection: string
+  cid: string | null
   record?: Record<string, unknown> | null
 }
 
@@ -103,6 +104,14 @@ describe('GET /xrpc/social.dept.obelisk.getEvents', () => {
     expect((await fetchEvents('?collection=site.standard.publication')).events).toHaveLength(1)
     expect((await fetchEvents('?did=did:plc:other')).events).toHaveLength(1)
     expect((await fetchEvents('?action=delete')).events).toHaveLength(1)
+  })
+
+  test('carries the record cid, null on a delete', async () => {
+    await applyEvent(db, testConfig, makeEvent({ rkey: 'c1', cid: 'bafyreicreate' }))
+    await applyEvent(db, testConfig, makeEvent({ rkey: 'c1', action: 'delete', record: null }))
+
+    const { events: rows } = await fetchEvents()
+    expect(rows.map((e) => e.cid)).toEqual(['bafyreicreate', null])
   })
 
   test('record json filter narrows events', async () => {

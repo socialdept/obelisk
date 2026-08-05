@@ -250,6 +250,26 @@ curl -X POST … "localhost:6060/xrpc/social.dept.obelisk.createWebhook" -d '{
 
 Verify with `hash_equals('sha256='.hash_hmac('sha256', $body, $secret), $sigHeader)`. Delivery is at-least-once with per-subscription cursor: failures back off exponentially and never advance the cursor, `updateWebhook {"id": N, "cursor": M}` rewinds for replay, `testWebhook {"id": N}` sends a synthetic signed event.
 
+Both planes carry the same event shape — a batch POST wraps it, `getEvents` pages it:
+
+```jsonc
+{
+  "cursor": "1234",                  // monotonic event id; resume from here
+  "uri": "at://did:plc:…/site.standard.document/3l…",
+  "did": "did:plc:…",
+  "collection": "site.standard.document",
+  "rkey": "3l…",
+  "action": "create",                // create | update | delete
+  "cid": "bafyrei…",                 // null on delete
+  "rev": "3l…",                      // commit rev
+  "live": true,                      // false = backfilled/historical
+  "createdAt": "2026-08-04T…Z",      // when the archive applied it
+  "record": { "$type": "…" }         // null on delete; omitted unless include_record
+}
+```
+
+Headers on a push delivery: `X-Obelisk-Subscription`, `X-Obelisk-Cursor`, `X-Obelisk-Signature`.
+
 ### Audiences
 
 An audience is a **query over the archive**, not a list you maintain — membership updates itself as the network changes (someone deleting their subscription record drops out automatically). Use `audience=<name>` on `getEvents` or in a webhook subscription to scope delivery to member DIDs.
