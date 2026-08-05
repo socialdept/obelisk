@@ -21,7 +21,11 @@ const JSON_AUTH = { ...AUTH, 'Content-Type': 'application/json' }
 
 interface Delivery {
   url: string
-  body: { subscription: string; cursor: string; events: { action: string; collection: string; uri: string }[] }
+  body: {
+    subscription: string
+    cursor: string
+    events: { action: string; collection: string; uri: string; cid: string | null }[]
+  }
   signature: string
   rawBody: string
 }
@@ -93,6 +97,16 @@ describe('WebhookWorker delivery', () => {
     // Nothing new — second tick is silent.
     expect(await worker.tick()).toBe(0)
     expect(deliveries).toHaveLength(1)
+  })
+
+  test('delivered events carry the record cid, null on a delete', async () => {
+    await applyEvent(db, testConfig, makeEvent({ rkey: 'cid1', cid: 'bafyreidelivered' }))
+    await applyEvent(db, testConfig, makeEvent({ rkey: 'cid1', action: 'delete', record: null }))
+    await createSub()
+
+    await new WebhookWorker(db, testConfig, fakeFetch).tick()
+
+    expect(deliveries[0]!.body.events.map((e) => e.cid)).toEqual(['bafyreidelivered', null])
   })
 
   test('collection, action, and record matchers filter the batch', async () => {

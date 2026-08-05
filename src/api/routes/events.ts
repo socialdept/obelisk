@@ -89,6 +89,8 @@ export async function queryEvents(
       collection: event.collection,
       rkey: event.rkey,
       action: event.action,
+      // Null on a delete — the archived row keeps its pre-delete cid.
+      cid: event.action === 'delete' ? null : record.cid,
       rev: event.rev,
       live: event.live,
       createdAt: event.createdAt,
