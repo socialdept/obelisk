@@ -11,6 +11,8 @@ import { logger } from '../log'
 
 const MAX_BACKOFF_MS = 300_000
 const FAILING_THRESHOLD = 100
+/** Consumer-signalled flow control: back off, but do not count toward FAILING_THRESHOLD. */
+const BACKPRESSURE_STATUSES = new Set([429, 503])
 const log = logger('webhook')
 
 export type FetchFn = typeof fetch
@@ -86,7 +88,11 @@ export class WebhookWorker {
 
     const result = await this.post(sub, body, lastCursor)
     if (!result.ok) {
-      await this.recordFailure(sub, `${result.detail} (${batch.length} events, ${body.length} bytes)`)
+      await this.recordFailure(
+        sub,
+        `${result.detail} (${batch.length} events, ${body.length} bytes)`,
+        result.backpressure,
+      )
       return false
     }
 
@@ -157,7 +163,7 @@ export class WebhookWorker {
     sub: WebhookSubscription,
     body: string,
     cursor: string,
-  ): Promise<{ ok: boolean; detail: string }> {
+  ): Promise<{ ok: boolean; detail: string; backpressure?: boolean }> {
     try {
       const response = await this.fetchFn(sub.url, {
         method: 'POST',
@@ -169,18 +175,40 @@ export class WebhookWorker {
         },
         body,
       })
-      return { ok: response.ok, detail: `HTTP ${response.status}` }
+      return {
+        ok: response.ok,
+        detail: `HTTP ${response.status}`,
+        // 429/503 are the consumer asking us to slow down, not reporting a
+        // fault. Treated as flow control so a long saturation cannot retire
+        // the subscription (see recordFailure).
+        backpressure: BACKPRESSURE_STATUSES.has(response.status),
+      }
     } catch (err) {
       return { ok: false, detail: err instanceof Error ? err.message : String(err) }
     }
   }
 
-  private async recordFailure(sub: WebhookSubscription, detail: string): Promise<void> {
-    const failureCount = sub.failureCount + 1
-    const backoff = Math.min(1000 * 2 ** failureCount, MAX_BACKOFF_MS)
+  /**
+   * Back off after a rejected delivery.
+   *
+   * `backpressure` separates "not now" from "broken". A consumer answering 429
+   * or 503 is telling us it is saturated — the correct response is to slow down,
+   * not to eventually give up on it. Counting those toward FAILING_THRESHOLD
+   * would turn a consumer's own flow control into an outage it then has to
+   * clear by hand, which is precisely backwards during a large backfill.
+   *
+   * The backoff still applies, and it is computed from the existing failure
+   * count so a saturated consumer is not hammered every tick.
+   */
+  private async recordFailure(sub: WebhookSubscription, detail: string, backpressure = false): Promise<void> {
+    const failureCount = backpressure ? sub.failureCount : sub.failureCount + 1
+    const backoff = Math.min(1000 * 2 ** Math.max(failureCount, 1), MAX_BACKOFF_MS)
     const status = failureCount >= FAILING_THRESHOLD ? 'failing' : sub.status
 
-    console.error(`webhook worker: delivery to "${sub.name}" failed (${failureCount}): ${detail}, retry in ${backoff}ms`)
+    const label = backpressure ? 'is saturated' : 'failed'
+    console.error(
+      `webhook worker: delivery to "${sub.name}" ${label} (${failureCount}): ${detail}, retry in ${backoff}ms`,
+    )
     await this.db
       .update(webhookSubscriptions)
       .set({ failureCount, status, nextAttemptAt: new Date(Date.now() + backoff) })

@@ -109,6 +109,48 @@ describe('WebhookWorker delivery', () => {
     expect(deliveries[0]!.body.events.map((e) => e.cid)).toEqual(['bafyreidelivered', null])
   })
 
+  test('a 503 backs off without counting toward the failing threshold', async () => {
+    await applyEvent(db, testConfig, makeEvent({ rkey: 'bp1' }))
+    // Already deep into a saturation run — one short of being retired.
+    const id = await createSub({ failureCount: 99 })
+    respondWith = () => new Response('saturated', { status: 503 })
+
+    await new WebhookWorker(db, testConfig, fakeFetch).tick()
+
+    const sub = (await db.select().from(webhookSubscriptions).where(eq(webhookSubscriptions.id, id)))[0]!
+    // Flow control is not failure: the count holds and the subscription stays
+    // active, so a consumer throttling a long backfill cannot retire itself.
+    expect(sub.failureCount).toBe(99)
+    expect(sub.status).toBe('active')
+    expect(sub.cursor).toBe(0)
+    // It still backs off rather than hammering every tick.
+    expect(sub.nextAttemptAt.getTime()).toBeGreaterThan(Date.now())
+  })
+
+  test('429 is treated as backpressure too', async () => {
+    await applyEvent(db, testConfig, makeEvent({ rkey: 'bp2' }))
+    const id = await createSub({ failureCount: 5 })
+    respondWith = () => new Response('slow down', { status: 429 })
+
+    await new WebhookWorker(db, testConfig, fakeFetch).tick()
+
+    const sub = (await db.select().from(webhookSubscriptions).where(eq(webhookSubscriptions.id, id)))[0]!
+    expect(sub.failureCount).toBe(5)
+    expect(sub.status).toBe('active')
+  })
+
+  test('a real fault still counts and still retires the subscription', async () => {
+    await applyEvent(db, testConfig, makeEvent({ rkey: 'bp3' }))
+    const id = await createSub({ failureCount: 99 })
+    respondWith = () => new Response('boom', { status: 500 })
+
+    await new WebhookWorker(db, testConfig, fakeFetch).tick()
+
+    const sub = (await db.select().from(webhookSubscriptions).where(eq(webhookSubscriptions.id, id)))[0]!
+    expect(sub.failureCount).toBe(100)
+    expect(sub.status).toBe('failing')
+  })
+
   test('collection, action, and record matchers filter the batch', async () => {
     await applyEvent(db, testConfig, makeEvent({ rkey: 'a', record: { title: 'X', content: { $type: 'app.offprint.content' } } }))
     await applyEvent(db, testConfig, makeEvent({ rkey: 'b', record: { title: 'Y', content: { $type: 'pub.leaflet.content' } } }))
