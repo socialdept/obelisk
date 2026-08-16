@@ -4,9 +4,23 @@ import { migrate } from '../src/db/migrate'
 import type { ObeliskConfig } from '../src/config'
 import type { RecordEvent } from '../src/ingest/upsert'
 
-const ADMIN_URL = process.env.TEST_ADMIN_DATABASE_URL ?? 'postgres://obelisk:obelisk@localhost:5432/obelisk'
-export const TEST_DATABASE_URL =
-  process.env.TEST_DATABASE_URL ?? 'postgres://obelisk:obelisk@localhost:5432/obelisk_test'
+/**
+ * Bun loads .env, so the project's own DATABASE_URL is the right default: the
+ * hardcoded localhost:5432 guess silently targets a different Postgres when
+ * compose publishes another port, and the suite fails to authenticate rather
+ * than reporting a misconfiguration.
+ */
+const DEFAULT_URL = process.env.DATABASE_URL ?? 'postgres://obelisk:obelisk@localhost:5432/obelisk'
+
+/** Always swap the database name, so a test run can never target the dev DB. */
+function withDatabase(url: string, name: string): string {
+  const parsed = new URL(url)
+  parsed.pathname = `/${name}`
+  return parsed.toString()
+}
+
+const ADMIN_URL = process.env.TEST_ADMIN_DATABASE_URL ?? DEFAULT_URL
+export const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL ?? withDatabase(DEFAULT_URL, 'obelisk_test')
 
 export async function setupTestDb(): Promise<{ db: Db; teardown: () => Promise<void> }> {
   const admin = postgres(ADMIN_URL, { max: 1, onnotice: () => {} })
@@ -25,7 +39,7 @@ export async function truncateAll(db: Db): Promise<void> {
   const { sql } = await import('drizzle-orm')
   await db.execute(
     sql.raw(
-      'TRUNCATE records, record_embeddings, record_links, interaction_counts, blocked_dids, blocked_pdses, cold_dids, cold_pdses, did_pds, constellation_cache, api_tokens RESTART IDENTITY CASCADE',
+      'TRUNCATE records, record_embeddings, record_links, interaction_counts, blocked_dids, blocked_pdses, cold_dids, cold_pdses, did_pds, constellation_cache, api_tokens, ingest_cursor RESTART IDENTITY CASCADE',
     ),
   )
 }
