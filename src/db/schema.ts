@@ -268,5 +268,17 @@ export const apiTokens = pgTable('api_tokens', {
   lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
 })
 
+/**
+ * Ingest position per source. Only used by sources with no ack channel
+ * (Jetstream); Tab keeps its own position and redelivers whatever it hasn't
+ * seen acked. Written inside the batch's transaction, so it never leads
+ * applied data.
+ */
+export const ingestCursor = pgTable('ingest_cursor', {
+  source: varchar('source', { length: 32 }).primaryKey(),
+  cursor: bigint('cursor', { mode: 'number' }).notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
 export type RecordRow = typeof records.$inferSelect
 export type RecordLinkRow = typeof recordLinks.$inferSelect

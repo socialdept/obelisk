@@ -57,9 +57,15 @@ export interface ObeliskConfig {
 
 export interface Env {
   databaseUrl: string
+  /** Which live ingest transport runs. Only one is active at a time. */
+  ingestSource: 'tab' | 'jetstream'
   tabWsUrl: string
   /** HTTP admin API of the footprint Tab (dynamic mode). Unset until LAB-29 lands. */
   tabFootprintAdminUrl?: string
+  /** Jetstream v2 instance, used when ingestSource is 'jetstream'. */
+  jetstreamUrl: string
+  /** Collections to subscribe to (max 100). Empty means every collection. */
+  jetstreamCollections: string[]
   ollamaUrl: string
   port: number
   /** Interface the HTTP server binds. Default 0.0.0.0; set 127.0.0.1 for loopback-only. */
@@ -130,10 +136,32 @@ export function loadEnv(): Env {
     )
   }
 
+  const ingestSource = process.env.INGEST_SOURCE ?? 'tab'
+  if (ingestSource !== 'tab' && ingestSource !== 'jetstream') {
+    throw new Error(`INGEST_SOURCE must be 'tab' or 'jetstream', got: ${ingestSource}`)
+  }
+
+  // Jetstream caps a subscription at 100 collections and rejects the whole
+  // connection past that, which would show up as an unexplained failure to
+  // connect rather than a config error.
+  const jetstreamCollections = (process.env.JETSTREAM_COLLECTIONS ?? '')
+    .split(',')
+    .map((c) => c.trim())
+    .filter(Boolean)
+  if (jetstreamCollections.length > 100) {
+    throw new Error(`JETSTREAM_COLLECTIONS accepts at most 100 entries, got: ${jetstreamCollections.length}`)
+  }
+
   return {
     databaseUrl,
+    ingestSource,
     tabWsUrl: urlEnv('TAB_WS_URL', process.env.TAB_WS_URL ?? 'ws://localhost:2480'),
     tabFootprintAdminUrl: process.env.TAB_FOOTPRINT_ADMIN_URL,
+    jetstreamUrl: urlEnv(
+      'JETSTREAM_URL',
+      process.env.JETSTREAM_URL ?? 'wss://jetstream.us-west.bsky.network',
+    ),
+    jetstreamCollections,
     ollamaUrl: urlEnv('OLLAMA_URL', process.env.OLLAMA_URL ?? 'http://127.0.0.1:11434'),
     port: intEnv('PORT', 6060),
     host,

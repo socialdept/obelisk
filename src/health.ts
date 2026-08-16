@@ -102,7 +102,11 @@ export function metricsText(report: ReadyReport): string {
     gauge('obelisk_embed_backoff', Number(c.embedWorker.embedFailures ?? 0), 'Consecutive embed-backend failures (backoff level)')
   }
   if (c.ingester) {
-    gauge('obelisk_ingester_connected', bit(Boolean(c.ingester.connected)), 'Ingester websocket connected to Tab')
+    gauge(
+      'obelisk_ingester_connected',
+      bit(Boolean(c.ingester.connected)),
+      'Ingester websocket connected to its source (Tab or Jetstream)',
+    )
     gauge('obelisk_ingester_applied', Number(c.ingester.applied ?? 0), 'Records applied by the ingester')
     gauge('obelisk_ingester_skipped', Number(c.ingester.skipped ?? 0), 'Events skipped by the ingester')
     gauge('obelisk_ingester_pending', Number(c.ingester.pending ?? 0), 'Events buffered in the ingester')

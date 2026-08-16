@@ -7,7 +7,9 @@ import { EmbedWorker } from './embed/worker'
 import { RepoBackfiller } from './ingest/backfill-runner'
 import { Blocklist } from './ingest/blocklist'
 import { ColdList, ColdPdsList } from './ingest/cold'
+import type { IngestDriver } from './ingest/driver'
 import { Ingester } from './ingest/ingester'
+import { JetstreamIngester } from './ingest/jetstream'
 import { PdsBlocklist } from './ingest/pds-blocklist'
 import { TabAdmin } from './ingest/tab-admin'
 import { createExtractionResolver } from './lexicon/collection'
@@ -37,7 +39,16 @@ await coldList.load(db)
 const coldPdsList = new ColdPdsList(db, undefined, (config.identity?.didPdsCacheTtlSeconds ?? 86_400) * 1000)
 await coldPdsList.loadPatterns()
 const backfiller = new RepoBackfiller(db, config, coldList, coldPdsList)
-const ingester = new Ingester(db, config, {}, blocklist, pdsBlocklist, coldList, coldPdsList)
+const ingestDeps = { blocklist, pdsBlocklist, coldList, coldPdsList }
+const ingester: IngestDriver =
+  env.ingestSource === 'jetstream'
+    ? new JetstreamIngester(
+        db,
+        config,
+        { url: env.jetstreamUrl, collections: env.jetstreamCollections },
+        ingestDeps,
+      )
+    : new Ingester(db, config, { wsUrl: env.tabWsUrl }, ingestDeps)
 const embedWorker = new EmbedWorker(db, config, embedder, {
   claimSize: env.embedBatchSize,
   textKeys: createTextKeysResolver(lexicons),
@@ -66,7 +77,7 @@ const shutdown = async () => {
 process.on('SIGINT', shutdown)
 process.on('SIGTERM', shutdown)
 
-ingester.start(env.tabWsUrl)
+ingester.start()
 embedWorker.start()
 webhookWorker.start()
 
