@@ -1,9 +1,40 @@
 # Jetstream cutover and ingest resource work
 
 Status of the 2026-08-16 session: why Tab was burning the box, what changed on
-production, what is built but not shipped, and what still needs verifying.
-Written mid-flight — the production switch is applied but **not yet verified**,
-because Bluesky went down during the verification window.
+production, and what is built but not shipped.
+
+---
+
+## Outcome, read this first
+
+**The Jetstream switch works and is verified.** Three separate repos delivered
+`live: true` events hours after the cutover, with the relay bypassed
+(`firehose_events_received` 0) and network I/O down from 318MB to 55MB. That
+half of the problem is solved and the change stays on production.
+
+**It did not achieve the goal.** The point was to downsize to a $5 box. Tab then
+OOM-looped ~222 times: 31 boots in 30 minutes, kernel kills at ~508MiB, then at
+~765MiB after the cap was raised. Three caps have now failed the same way
+(256M → 512M → 768M), so the growth is unbounded and no cap holds it.
+
+**The cause is resync, not the firehose.** Tab enumerates 589 repos, parses
+their CARs, dies before draining the queue, restarts, and repeats — 44.6GB of
+block reads doing the same work over and over. The CPU is that loop, not useful
+throughput. This predates the switch and was masked by the firehose cost.
+
+**So Tab cannot fit a $5 box** (1 vCPU / 1GB). Postgres, the app and Caddy total
+~296MiB and idle under 3% CPU; they fit comfortably. Tab does not. Reaching the
+goal means **removing Tab**, which is what the v2 driver below is for — not
+tuning it further.
+
+Next step when picking this up: capture a heap profile while Tab is near its
+ceiling (`curl -s "localhost:2481/debug/pprof/heap?debug=1"`) to identify the
+allocation. `TAB_OUTBOX_CAPACITY` (default 100,000 buffered events) is the
+leading untested suspect.
+
+Tuning applied and then reverted, for the record: `TAB_RESYNC_PARALLELISM` 2→1,
+`GOMEMLIMIT` 400→600MiB, memory cap 512M→768M. None helped.
+`TAB_JETSTREAM_URL` was kept.
 
 ---
 
@@ -29,9 +60,12 @@ restarts at a 256M cap, `RELAY_IDENT_CACHE_SIZE` reduced from 2,000,000,
 `TAB_RESYNC_PARALLELISM` cut to 2, `GOMEMLIMIT=400MiB` added, limit raised to
 512M. Memory still sat pinned at the ceiling.
 
-`GOMEMLIMIT` could never fix it: it bounds the Go heap, but RSS was inflated by
-SQLite's off-heap page cache via CGO, which the Go GC does not manage. The
-firehose working set was the actual cause.
+`GOMEMLIMIT` could never fix it: it bounds the Go heap, while the kernel kills
+on anonymous RSS, which includes memory malloc'd outside the Go heap. Raising it
+has never changed the outcome.
+
+The firehose was assumed to be the cause. It was not — see the outcome section.
+Removing it left the OOM loop intact.
 
 ---
 
@@ -62,10 +96,9 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d tab
 | Block I/O | 48.2GB read | 15.7MB |
 | `firehose_events_received` | 4,439 | 0 (relay bypassed) |
 
-The memory drop is the OOM cause identified. CPU was still 61% when last
-sampled, but that was the post-boot enumeration/resync burst (589 repos, CAR
-parsing), not firehose decode — network I/O was only 12.3MB. **CPU needs
-re-measuring at steady state.**
+The 84MiB reading was a freshly booted process, not a steady state — it climbed
+back to the ceiling within minutes. The network and block I/O reductions are
+real and permanent; the memory figure was not a fix.
 
 ### Verified before switching
 
@@ -86,55 +119,18 @@ variants concurrently.
 
 ---
 
-## Not yet verified
-
-`tab_jetstream_events_processed_total` was **0** (52 received) when Bluesky went
-down. A low processed/received ratio is normal — Tab only processes events from
-enumerated repos, and the firehose baseline was 35/4,439 — but zero is also what
-a broken tracking path looks like.
-
-Jetstream confirmed dead at the time from an independent probe: 0 messages in
-25s on `app.bsky.feed.post`, which had returned 499 in 25s an hour earlier. So
-the reading is confounded by the outage, not by configuration.
-
-### Verification to run once Bluesky recovers
-
-Publish or update an article (local dev against an existing session is fine —
-the record lands in a real repo), then:
-
-```
-curl -s localhost:2481/metrics | grep -E "tab_jetstream_events_(received|processed)_total"
-docker exec -i obelisk-postgres-1 psql -U obelisk -d obelisk -c "SELECT count(*) FROM records;"
-docker stats --no-stream obelisk-tab-1
-docker inspect obelisk-tab-1 --format 'restarts={{.RestartCount}} oom={{.State.OOMKilled}}'
-```
-
-Pass: `processed` moves off zero, `records` advances past **3,056,913**, CPU
-well below 66%, `RestartCount` stable.
-
-Fail: `received` climbs while `processed` stays 0 after a known-tracked repo
-publishes. That means the enumerated repo set did not carry over — roll back.
-
-### Rollback
-
-Remove `TAB_JETSTREAM_URL`, `docker compose … up -d tab`. The firehose cursor
-persists in the `tabdata` volume, so the relay resumes where it stopped —
-**valid for roughly 72 hours** (relay backfill window), and only while that
-volume exists. Do not delete `tabdata`.
-
----
-
 ## Built locally, not shipped
 
-Branch `claude/jetstream-v2-and-retention`, three commits, **not pushed**.
+Branch `claude/jetstream-v2-and-retention`, pushed. The retention commit
+(`d104d6d`) was reverted — the event log backs `getEvents` and is history in its
+own right, so an archive keeps it.
 
 | commit | contents |
 |---|---|
 | `9e4d437` | Test DB defaults to the project's `DATABASE_URL` |
 | `106b56f` | Jetstream **v2** ingest driver behind `INGEST_SOURCE` |
-| `d104d6d` | Opt-in event-log retention, disabled by default |
 
-Typecheck clean, 374 tests pass.
+Typecheck clean, 365 tests pass.
 
 **Test DB fix** — `test/helpers.ts` defaulted to `localhost:5432` with default
 credentials while the compose Postgres is on 5433 with a password, so the entire
@@ -150,22 +146,14 @@ locally: 252 records on a cold start, then resumed from the stored cursor.
 
 Default is `INGEST_SOURCE=tab`, so nothing changes until opted in.
 
-This is **not** the fix for the production box — `TAB_JETSTREAM_URL` is, and it
-is better, because Tab still sits in front of Obelisk providing acked delivery
-and redelivery. The driver matters for two other reasons: Tab is v1-only and v1
-will eventually retire, and the driver is the path for anyone who wants Obelisk
-without running Tab at all. It also has a real gap: Tab uses Light Rail
+**This is the path to the $5 box.** `TAB_JETSTREAM_URL` removed the firehose
+cost but cannot remove Tab's footprint, and the footprint is what does not fit.
+Keeping Tab means keeping ~500MiB+ of unbounded growth on a 1GB box.
+
+The trade is real: Tab provides acked, indefinitely-redelivered delivery, where
+Jetstream gives cursor resume bounded by retention. And there is a gap: Tab uses Light Rail
 (`listReposByCollection`) to discover repos by collection, and Jetstream has no
 equivalent, so dropping Tab loses historical discovery of dormant repos.
-
-**Event-log retention** (`src/db/retention.ts`, `scripts/prune-events.ts`) —
-opt-in via `EVENTS_RETENTION_DAYS`, **default 0 = disabled, and should stay
-disabled here.** The event log backs `getEvents`, which is queryable by
-since/until/collection/did/action, so it is history in its own right, not a
-delivery buffer. It exists for deployments using Obelisk as a pure delivery
-relay. Deletes only what every webhook subscription has been delivered past AND
-that is older than the floor; the age floor protects `getEvents` pull consumers
-whose cursors live in their own database.
 
 ---
 
@@ -199,9 +187,10 @@ mount or Postgres will initialise an empty database on the mount point.
 
 ## Open threads
 
-- Verify `processed` once Bluesky recovers (above). Everything else is blocked
-  on this.
-- Re-measure steady-state CPU after the enumeration burst finishes.
+- Heap profile Tab near its ceiling to identify the allocation; test
+  `TAB_OUTBOX_CAPACITY` as the leading suspect.
+- Decide whether to remove Tab (driver + a Light Rail discovery sweep) or accept
+  a RAM tier rather than a $5 one.
 - If memory stays low, `GOMEMLIMIT`, `RELAY_IDENT_CACHE_SIZE` and the 512M cap
   become removable rather than load-bearing.
 - `2.7M` records landed in the 7 days before this session (vs ~14.5k/day
