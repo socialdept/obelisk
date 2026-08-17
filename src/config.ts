@@ -77,8 +77,6 @@ export interface Env {
   dbStatementTimeoutMs: number
   /** Embed batch size = concurrent embeds per tick (LAB-59). Higher drains a backlog faster. */
   embedBatchSize: number
-  /** Days of delivered event log to keep. 0 disables trimming entirely. */
-  eventsRetentionDays: number
   /** Embedding backend selection (LAB-9). */
   embedding: {
     provider: 'ollama' | 'openai'
@@ -165,7 +163,6 @@ export function loadEnv(): Env {
     ),
     jetstreamCollections,
     ollamaUrl: urlEnv('OLLAMA_URL', process.env.OLLAMA_URL ?? 'http://127.0.0.1:11434'),
-    eventsRetentionDays: intEnv('EVENTS_RETENTION_DAYS', 0),
     port: intEnv('PORT', 6060),
     host,
     devMode,

@@ -18,7 +18,6 @@ export interface HealthProviders {
   ingester?: () => ComponentStatus
   embedWorker?: () => ComponentStatus
   webhookWorker?: () => ComponentStatus
-  retentionWorker?: () => ComponentStatus
   embedder?: () => ComponentStatus | Promise<ComponentStatus>
 }
 
@@ -65,7 +64,6 @@ export async function readyReport(db: Db, providers: HealthProviders = {}): Prom
   if (providers.ingester) components.ingester = providers.ingester()
   if (providers.embedWorker) components.embedWorker = providers.embedWorker()
   if (providers.webhookWorker) components.webhookWorker = providers.webhookWorker()
-  if (providers.retentionWorker) components.retentionWorker = providers.retentionWorker()
   if (providers.embedder) components.embedder = await providers.embedder()
 
   const statuses = Object.values(components).map((c) => c.status)

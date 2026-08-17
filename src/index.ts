@@ -2,7 +2,6 @@ import { createApp } from './api/app'
 import { loadConfig, loadEnv } from './config'
 import { createDb } from './db/client'
 import { migrate } from './db/migrate'
-import { RetentionWorker } from './db/retention-worker'
 import { createEmbeddingProvider } from './embed/provider'
 import { EmbedWorker } from './embed/worker'
 import { RepoBackfiller } from './ingest/backfill-runner'
@@ -56,7 +55,6 @@ const embedWorker = new EmbedWorker(db, config, embedder, {
   extraction: createExtractionResolver(lexicons, config.collections),
 })
 const webhookWorker = new WebhookWorker(db, config)
-const retentionWorker = new RetentionWorker(db, env.eventsRetentionDays)
 const tabAdmin = new TabAdmin(env.tabFootprintAdminUrl)
 
 const shutdown = async () => {
@@ -72,7 +70,6 @@ const shutdown = async () => {
   await ingester.stop()
   await embedWorker.stop()
   await webhookWorker.stop()
-  await retentionWorker.stop()
   await client.end()
   process.exit(0)
 }
@@ -83,7 +80,6 @@ process.on('SIGTERM', shutdown)
 ingester.start()
 embedWorker.start()
 webhookWorker.start()
-retentionWorker.start()
 
 const app = createApp({
   db,
@@ -101,7 +97,6 @@ const app = createApp({
     ingester: () => ingester.status(),
     embedWorker: () => embedWorker.status(),
     webhookWorker: () => webhookWorker.status(),
-    retentionWorker: () => retentionWorker.status(),
     embedder: () => embedder.health(),
   },
   devMode: env.devMode,
