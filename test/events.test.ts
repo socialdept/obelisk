@@ -21,6 +21,7 @@ interface EventJson {
   action: string
   collection: string
   cid: string | null
+  superseded: boolean
   record?: Record<string, unknown> | null
 }
 
@@ -47,12 +48,13 @@ beforeEach(async () => {
 
 describe('event log writes', () => {
   test('applied create/update/delete each append one event', async () => {
-    await applyEvent(db, testConfig, makeEvent({ rkey: 'e1' }))
-    await applyEvent(db, testConfig, makeEvent({ rkey: 'e1', action: 'update', record: { title: 'v2' } }))
-    await applyEvent(db, testConfig, makeEvent({ rkey: 'e1', action: 'delete', record: null }))
+    await applyEvent(db, testConfig, makeEvent({ rkey: 'e1', cid: 'bafyv1' }))
+    await applyEvent(db, testConfig, makeEvent({ rkey: 'e1', action: 'update', cid: 'bafyv2', record: { title: 'v2' } }))
+    await applyEvent(db, testConfig, makeEvent({ rkey: 'e1', action: 'delete', cid: null, record: null }))
 
     const rows = await db.select().from(events)
     expect(rows.map((r) => r.action)).toEqual(['create', 'update', 'delete'])
+    expect(rows.map((r) => r.cid)).toEqual(['bafyv1', 'bafyv2', null])
   })
 
   test('skipped redeliveries append nothing', async () => {
@@ -141,6 +143,41 @@ describe('GET /xrpc/social.dept.obelisk.getEvents', () => {
 
     const bare = await fetchEvents()
     expect(bare.events[0]!.record).toBeUndefined()
+  })
+
+  /*
+   * An event listed after its record moved on once reported the record's
+   * current CID and body, so a consumer's echo guard matched a version that event
+   * never wrote. It must report its own CID and withhold the newer body.
+   */
+  test('an event read after a later update keeps its own cid and withholds the newer body', async () => {
+    await applyEvent(db, testConfig, makeEvent({ rkey: 's1', cid: 'bafyfirst', record: { title: 'First' } }))
+    await applyEvent(
+      db,
+      testConfig,
+      makeEvent({ rkey: 's1', action: 'update', cid: 'bafysecond', record: { title: 'Second' } }),
+    )
+
+    const { events: list } = await fetchEvents('?include_record=1')
+
+    expect(list[0]!.cid).toBe('bafyfirst')
+    expect(list[0]!.record).toBeNull()
+    expect(list[0]!.superseded).toBe(true)
+
+    expect(list[1]!.cid).toBe('bafysecond')
+    expect((list[1]!.record as { title: string }).title).toBe('Second')
+    expect(list[1]!.superseded).toBe(false)
+  })
+
+  test('an event logged before events carried a cid falls back to the record cid', async () => {
+    await applyEvent(db, testConfig, makeEvent({ rkey: 'legacy', cid: 'bafylegacy' }))
+    await db.update(events).set({ cid: null })
+
+    const { events: list } = await fetchEvents('?include_record=1')
+
+    expect(list[0]!.cid).toBe('bafylegacy')
+    expect(list[0]!.superseded).toBe(false)
+    expect(list[0]!.record).not.toBeNull()
   })
 
   test('rejects garbage cursor', async () => {

@@ -24,7 +24,14 @@ interface Delivery {
   body: {
     subscription: string
     cursor: string
-    events: { action: string; collection: string; uri: string; cid: string | null }[]
+    events: {
+      action: string
+      collection: string
+      uri: string
+      cid: string | null
+      superseded: boolean
+      record?: Record<string, unknown> | null
+    }[]
   }
   signature: string
   rawBody: string
@@ -107,6 +114,32 @@ describe('WebhookWorker delivery', () => {
     await new WebhookWorker(db, testConfig, fakeFetch).tick()
 
     expect(deliveries[0]!.body.events.map((e) => e.cid)).toEqual(['bafyreidelivered', null])
+  })
+
+  /*
+   * A delivery made after the record moved on once carried the record's
+   * current CID and body, so a consumer's echo guard matched its own later write
+   * and a publish looped. The event must carry its own CID and no newer body.
+   */
+  test('an event delivered after a later update keeps its own cid and withholds the newer body', async () => {
+    await applyEvent(db, testConfig, makeEvent({ rkey: 's1', cid: 'bafyfirst', record: { title: 'First' } }))
+    await applyEvent(
+      db,
+      testConfig,
+      makeEvent({ rkey: 's1', action: 'update', cid: 'bafysecond', record: { title: 'Second' } }),
+    )
+    await createSub()
+
+    await new WebhookWorker(db, testConfig, fakeFetch).tick()
+
+    const [first, second] = deliveries[0]!.body.events
+    expect(first!.cid).toBe('bafyfirst')
+    expect(first!.record).toBeNull()
+    expect(first!.superseded).toBe(true)
+
+    expect(second!.cid).toBe('bafysecond')
+    expect(second!.record).toMatchObject({ title: 'Second' })
+    expect(second!.superseded).toBe(false)
   })
 
   test('a 503 backs off without counting toward the failing threshold', async () => {

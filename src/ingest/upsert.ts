@@ -158,6 +158,7 @@ async function logEvent(tx: Tx, recordId: number, event: RecordEvent): Promise<v
     collection: event.collection,
     rkey: event.rkey,
     action: event.action,
+    cid: event.action === 'delete' ? null : event.cid,
     rev: event.rev,
     live: event.live,
   })
