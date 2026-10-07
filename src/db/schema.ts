@@ -128,6 +128,7 @@ export const events = pgTable(
     collection: varchar('collection', { length: 255 }).notNull(),
     rkey: varchar('rkey', { length: 255 }).notNull(),
     action: varchar('action', { length: 20 }).notNull(),
+    cid: varchar('cid', { length: 255 }),
     rev: varchar('rev', { length: 255 }),
     live: boolean('live').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

@@ -260,13 +260,16 @@ Both planes carry the same event shape — a batch POST wraps it, `getEvents` pa
   "collection": "site.standard.document",
   "rkey": "3l…",
   "action": "create",                // create | update | delete
-  "cid": "bafyrei…",                 // null on delete
+  "cid": "bafyrei…",                 // the CID this event recorded; null on delete
   "rev": "3l…",                      // commit rev
   "live": true,                      // false = backfilled/historical
+  "superseded": false,               // true = the record has since changed; see below
   "createdAt": "2026-08-04T…Z",      // when the archive applied it
-  "record": { "$type": "…" }         // null on delete; omitted unless include_record
+  "record": { "$type": "…" }         // null on delete or superseded; omitted unless include_record
 }
 ```
+
+**`cid` is the event's own version, not the record's current one**. Each event stores the CID of the op it applied, so replaying an old event, or receiving one late, reports the version that event wrote. The archive keeps only a record's latest body, so when a later write has changed the record, the event is `superseded: true` and `record` is `null` rather than pairing the old CID with a newer body. Fetch the record (or wait for the newer event) to get the current body. Every event carries `superseded`, `false` when the body is still the version the event wrote. Events logged before migration `0019_event_cid` have no stored CID: they report the record's current CID and are never marked superseded, which is the old behavior.
 
 Headers on a push delivery: `X-Obelisk-Subscription`, `X-Obelisk-Cursor`, `X-Obelisk-Signature`.
 

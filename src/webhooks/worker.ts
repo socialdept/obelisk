@@ -5,6 +5,7 @@ import type { ObeliskConfig } from '../config'
 import type { Db } from '../db/client'
 import { events, records, webhookSubscriptions, type WebhookSubscription } from '../db/schema'
 import { buildFeedFilter } from '../feeds/filter'
+import { serializeEvent } from '../api/routes/events'
 import { jsonMatcherFilters } from '../api/routes/records'
 import type { ComponentStatus } from '../health'
 import { logger } from '../log'
@@ -142,21 +143,7 @@ export class WebhookWorker {
       .orderBy(asc(events.id))
       .limit(sub.maxEvents)
 
-    return rows.map(({ event, record }) => ({
-      cursor: String(event.id),
-      uri: record.uri,
-      did: event.did,
-      collection: event.collection,
-      rkey: event.rkey,
-      action: event.action,
-      // The record's current CID — null on a delete (the archived row keeps the
-      // pre-delete cid, which would misidentify the tombstone).
-      cid: event.action === 'delete' ? null : record.cid,
-      rev: event.rev,
-      live: event.live,
-      createdAt: event.createdAt,
-      ...(sub.includeRecord && { record: event.action === 'delete' ? null : record.record }),
-    }))
+    return rows.map(({ event, record }) => serializeEvent(event, record, sub.includeRecord))
   }
 
   private async post(

@@ -154,6 +154,7 @@ export async function testWebhook(
         cid: 'bafyreitestobelisksyntheticevent',
         rev: '3test',
         live: true,
+        superseded: false,
         createdAt: new Date().toISOString(),
         record: { $type: 'site.standard.document', title: 'Obelisk test event' },
       },

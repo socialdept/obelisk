@@ -10,6 +10,9 @@ import { clampLimit, recordJsonFilters } from './records'
 
 const MAX_LIMIT = 500
 
+type EventRow = typeof events.$inferSelect
+type RecordRow = typeof records.$inferSelect
+
 export interface EventsResult {
   events: unknown[]
   cursor: string | null
@@ -82,21 +85,39 @@ export async function queryEvents(
 
   const last = rows.at(-1)
   return {
-    events: rows.map(({ event, record }) => ({
-      cursor: String(event.id),
-      uri: record.uri,
-      did: event.did,
-      collection: event.collection,
-      rkey: event.rkey,
-      action: event.action,
-      // Null on a delete — the archived row keeps its pre-delete cid.
-      cid: event.action === 'delete' ? null : record.cid,
-      rev: event.rev,
-      live: event.live,
-      createdAt: event.createdAt,
-      ...(includeRecord && { record: event.action === 'delete' ? null : record.record }),
-    })),
+    events: rows.map(({ event, record }) => serializeEvent(event, record, includeRecord)),
     cursor: last ? String(last.event.id) : null,
+  }
+}
+
+/**
+ * The wire shape shared by `getEvents`, the SSE tail and webhook batches.
+ *
+ * An event reports the CID it recorded, not the record's current one.
+ * The archive keeps only the latest body, so an event whose CID no longer
+ * matches the record is `superseded` and carries `record: null`: pairing an
+ * older CID with a newer body would let a consumer's echo guard match a version
+ * it never wrote. Events logged before the column existed have no CID and fall
+ * back to the record's, as they always did.
+ */
+export function serializeEvent(event: EventRow, record: RecordRow, includeRecord: boolean) {
+  const isDelete = event.action === 'delete'
+  const superseded = !isDelete && event.cid !== null && event.cid !== record.cid
+
+  return {
+    cursor: String(event.id),
+    uri: record.uri,
+    did: event.did,
+    collection: event.collection,
+    rkey: event.rkey,
+    action: event.action,
+    // Null on a delete: the archived row keeps its pre-delete cid.
+    cid: isDelete ? null : (event.cid ?? record.cid),
+    rev: event.rev,
+    live: event.live,
+    superseded,
+    createdAt: event.createdAt,
+    ...(includeRecord && { record: isDelete || superseded ? null : record.record }),
   }
 }
 
@@ -137,9 +158,10 @@ export async function backfillEvents(
 
   const rows = await db.execute<{ seeded: number }>(sql`
     WITH ins AS (
-      INSERT INTO events (record_id, did, collection, rkey, action, rev, live)
+      INSERT INTO events (record_id, did, collection, rkey, action, cid, rev, live)
       SELECT ${records.id}, ${records.did}, ${records.collection}, ${records.rkey},
              CASE WHEN ${records.deletedAt} IS NULL THEN 'create' ELSE 'delete' END,
+             CASE WHEN ${records.deletedAt} IS NULL THEN ${records.cid} END,
              ${records.rev}, false
       FROM ${records}
       WHERE ${where}
